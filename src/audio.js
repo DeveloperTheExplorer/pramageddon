@@ -476,6 +476,25 @@ export class AudioEngine {
     gain.connect(this.sfxGain);
   }
 
+  dash() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const src = this.noiseSource(t, 0.22);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1600, t);
+    filter.frequency.exponentialRampToValueAtTime(320, t + 0.18);
+    filter.Q.value = 1.2;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.linearRampToValueAtTime(0.055, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    this.sfxTone(220, 0.08, 0.02, 'triangle', 110);
+  }
+
   footstep() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;

@@ -1031,7 +1031,7 @@ export function createWorld(scene, options = {}) {
   mailbox.position.set(-6.8, 1.25, 1.4);
   const mailFlag = box(0.04, 0.55, 0.04, '#ffd166');
   mailFlag.position.set(-6.48, 1.5, 1.4);
-  const addressSign = makeSign('BJØRKEVEIEN 3', '#f5e8d2', '#3a2a32', 300, 64);
+  const addressSign = makeSign('INGER · GJERDRUM', '#f5e8d2', '#3a2a32', 300, 64);
   addressSign.scale.set(0.3, 0.3, 0.3);
   addressSign.position.set(-6.8, 1.24, 1.86);
   scene.add(mailboxPost, mailbox, mailFlag, addressSign);

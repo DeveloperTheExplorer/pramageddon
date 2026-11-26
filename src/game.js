@@ -91,6 +91,8 @@ export class Game {
     this.cameraTarget = new THREE.Vector3(0, 0.2, 0.9);
     this.camera.position.copy(this.cameraBase);
     this.camera.lookAt(this.cameraTarget);
+    this.isPortrait = window.innerHeight > window.innerWidth;
+    this.cameraFocus = new THREE.Vector3(0, 0.2, 0.9);
 
     this.world = createWorld(this.scene, { mobile: this.isCoarse });
     this.player = createPlayer();
@@ -129,6 +131,7 @@ export class Game {
     this.pramStates = [];
     this.cardEls = [];
     this.particles = [];
+    this.offscreenEls = [];
     this.fox = null;
     this.foxTimer = 999;
     this.birdTimer = 8 + Math.random() * 7;
@@ -139,6 +142,17 @@ export class Game {
     this.keys = new Set();
     this.touchMove = { x: 0, y: 0 };
     this.joystickPointer = null;
+    this.dashTime = 0;
+    this.dashCooldown = 0;
+    this.dashDuration = 0.27;
+    this.dashSpeed = 9.4;
+    this.dashCooldownMax = 1.35;
+    this.dashDirection = new THREE.Vector2(0, 1);
+    this.throwAnimation = 0;
+    this.projectiles = [];
+    this.failureReason = null;
+    this.missedBabyName = '';
+    this.missedTargetLabel = '';
     this.playerVelocity = new THREE.Vector3();
     this.velocityXZ = new THREE.Vector2();
     this.flashTimer = 0;
@@ -230,8 +244,12 @@ export class Game {
       joystickKnob: $('joystick-knob'),
       touchAction: $('touch-action'),
       touchDrop: $('touch-drop'),
+      touchThrow: $('touch-throw'),
+      dashBtn: $('dash-btn'),
+      handThrow: $('hand-throw'),
       fullscreenBtn: $('fullscreen-btn'),
       orderRail: $('order-rail'),
+      offscreenMarkers: $('offscreen-markers'),
       handPill: $('hand-pill'),
       handContent: $('hand-content'),
       prompt: $('prompt'),
@@ -276,7 +294,6 @@ export class Game {
       helpBtn: $('help-btn'),
       startMute: $('start-mute-btn'),
       chaos: $('chaos-frame'),
-      orientationHint: $('orientation-hint'),
     };
   }
 
@@ -292,6 +309,7 @@ export class Game {
     this.dom.helpOk.addEventListener('click', () => this.closeHelp());
     this.dom.muteBtn.addEventListener('click', () => this.toggleMute());
     this.dom.startMute.addEventListener('click', () => this.toggleMute());
+    this.dom.dashBtn?.addEventListener('click', () => this.startDash());
     this.dom.nextNightBtn.addEventListener('click', () => this.nextNight());
     this.dom.retryNightBtn.addEventListener('click', () => this.retryNight());
     this.dom.resultsTitleBtn.addEventListener('click', () => this.returnToTitle());
@@ -335,6 +353,10 @@ export class Game {
         else if (this.mode === 'nightIntro') this.beginShift();
       } else if (code === 'KeyQ') {
         if (this.mode === 'playing') this.dropCarried();
+      } else if (code === 'ShiftLeft' || code === 'ShiftRight') {
+        if (this.mode === 'playing') this.startDash();
+      } else if (code === 'KeyR') {
+        if (this.mode === 'playing') this.throwCarried();
       }
     });
     window.addEventListener('keyup', (event) => {
@@ -354,6 +376,7 @@ export class Game {
     const knob = this.dom.joystickKnob;
     if (!joystick || !knob) return;
     let active = null;
+    let lastTap = 0;
     const update = (event) => {
       if (event.pointerId !== active) return;
       const rect = joystick.getBoundingClientRect();
@@ -379,6 +402,9 @@ export class Game {
       knob.style.transform = 'translate(0px, 0px)';
     };
     joystick.addEventListener('pointerdown', (event) => {
+      const now = performance.now();
+      if (this.mode === 'playing' && now - lastTap < 280) this.startDash();
+      lastTap = now;
       active = event.pointerId;
       this.joystickPointer = active;
       joystick.setPointerCapture(event.pointerId);
@@ -396,6 +422,10 @@ export class Game {
     this.dom.touchDrop?.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       if (this.mode === 'playing') this.dropCarried();
+    });
+    this.dom.touchThrow?.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      if (this.mode === 'playing') this.throwCarried();
     });
   }
 
@@ -442,8 +472,14 @@ export class Game {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const wasPortrait = this.isPortrait;
+    this.isPortrait = h > w;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
+    this.camera.fov = this.isPortrait ? 46 : 40;
+    if (this.isPortrait && !wasPortrait && this.player) {
+      this.cameraFocus.set(this.player.position.x, 0.2, 0.9);
+    }
     this.camera.updateProjectionMatrix();
   }
 
@@ -468,7 +504,9 @@ export class Game {
     this.night = NIGHTS[0];
     this.pramStates = [];
     this.cardEls = [];
+    this.offscreenEls = [];
     this.dom.orderRail.innerHTML = '';
+    if (this.dom.offscreenMarkers) this.dom.offscreenMarkers.innerHTML = '';
     this.setPreviewPrams(3);
     for (const pram of this.world.prams) {
       pram.group.userData.shakeGroup.position.set(0, 0, 0);
@@ -478,12 +516,15 @@ export class Game {
       pram.icon.material.needsUpdate = true;
       pram.icon.material.opacity = 0.8;
       pram.icon.scale.setScalar(0.62);
-      pram.icon.visible = pram.index < 3;
+      pram.icon.visible = false;
       pram.arrow.visible = false;
       pram.highlight.group.visible = false;
     }
     this.player.position.set(PLAYER_START.x, 0, PLAYER_START.z);
     this.player.rotation.y = 0;
+    for (const station of Object.values(this.world.stations)) {
+      if (station.icon) station.icon.visible = false;
+    }
     this.clearCarryVisual();
     this.carry = null;
     this.clearCrib();
@@ -534,7 +575,7 @@ export class Game {
     this.dom.screenNight.classList.remove('hidden');
     this.world.setShiftMood(this.nightIndex);
     this.dom.nightNumber.textContent = `SHIFT ${this.night.number}`;
-    if (this.dom.nightEyebrow) this.dom.nightEyebrow.textContent = `SHIFT BRIEFING · ${this.night.clock}`;
+    if (this.dom.nightEyebrow) this.dom.nightEyebrow.textContent = `INGER’S SHIFT · GJERDRUM · ${this.night.clock}`;
     this.dom.nightTitle.textContent = this.night.name;
     this.dom.nightSubtitle.textContent = this.night.subtitle;
     this.dom.nightDuration.textContent = formatTime(this.night.duration);
@@ -543,8 +584,8 @@ export class Game {
     this.dom.nightTip.textContent = this.night.tip;
     if (this.dom.nightControls) {
       this.dom.nightControls.innerHTML = window.matchMedia('(pointer: coarse)').matches
-        ? '<span><b>LEFT PAD</b> move</span><span><b>E</b> grab / give</span><span><b>Q</b> drop</span>'
-        : '<span><b>WASD</b> move</span><span><b>E</b> grab / give</span><span><b>Q</b> drop</span>';
+        ? '<span><b>PAD</b> move</span><span><b>E</b> act</span><span><b>Q</b> drop</span><span><b>THROW</b> yeet</span><span><b>ϟ</b> dash</span>'
+        : '<span><b>WASD</b> move</span><span><b>E</b> grab</span><span><b>Q</b> drop</span><span><b>SHIFT</b> dash</span><span><b>R</b> throw</span>';
     }
     this.setPreviewPrams(this.night.pramCount);
     this.player.position.set(PLAYER_START.x, 0, PLAYER_START.z);
@@ -595,6 +636,13 @@ export class Game {
     this.trauma = 0;
     this.countdownHide = 0;
     this.lastHud = 0;
+    this.dashTime = 0;
+    this.dashCooldown = 0;
+    this.throwAnimation = 0;
+    this.failureReason = null;
+    this.missedBabyName = '';
+    this.missedTargetLabel = '';
+    this.clearProjectiles();
     this.foxTimer = this.night.foxEvery ? this.night.foxEvery * 0.7 : 999;
     this.birdTimer = 7 + Math.random() * 8;
     this.fox = null;
@@ -603,6 +651,7 @@ export class Game {
     this.needSequence = this.night.number === 1 ? ['pacifier', 'bottle', 'blanket', 'teddy'] : [];
     this.player.position.set(PLAYER_START.x, 0, PLAYER_START.z);
     this.player.rotation.y = 0;
+    this.cameraFocus.set(PLAYER_START.x, 0.2, 0.9);
     this.playerVelocity.set(0, 0, 0);
     this.velocityXZ.set(0, 0);
     this.keys.clear();
@@ -643,7 +692,7 @@ export class Game {
         state: 'calm',
         need: null,
         fuss: 0.06 + Math.random() * 0.12,
-        calmTimer: 4.8 + i * 2.1 + Math.random() * 0.8,
+        calmTimer: 6.3 + i * 2.4 + Math.random() * 1.0,
         cryTimer: 0,
         shake: 0,
         carryMood: null,
@@ -653,9 +702,12 @@ export class Game {
       this.pramStates.push(state);
       this.applyPramIcon(state);
     }
+    for (const station of Object.values(this.world.stations)) {
+      if (station.icon) station.icon.visible = true;
+    }
     this.buildOrderCards();
     this.dom.hudNight.textContent = `SHIFT ${this.night.number}`;
-    this.dom.hudShiftName.textContent = this.night.name.toUpperCase();
+    this.dom.hudShiftName.textContent = `INGER · ${this.night.name.toUpperCase()}`;
     this.dom.hudTimer.textContent = formatTime(this.timeLeft);
     this.dom.hudScore.textContent = '0';
     this.dom.hudCombo.classList.add('hidden');
@@ -702,6 +754,30 @@ export class Game {
       lastState: '',
       lastIcon: '',
     }));
+
+    if (this.dom.offscreenMarkers) {
+      this.dom.offscreenMarkers.innerHTML = this.pramStates
+        .map(
+          (p) => `
+          <div class="offscreen-marker" data-pram="${p.index}">
+            <span class="om-orbit"><span class="om-arrow">▲</span></span>
+            <img class="pixel-icon" src="${getIconDataUrl('zzz')}" alt="" draggable="false" />
+          </div>`
+        )
+        .join('');
+      this.offscreenEls = this.pramStates.map((p) => {
+        const el = this.dom.offscreenMarkers.querySelector(`[data-pram="${p.index}"]`);
+        return {
+          el,
+          icon: el.querySelector('img'),
+          orbit: el.querySelector('.om-orbit'),
+          lastIcon: '',
+          lastClass: '',
+        };
+      });
+    } else {
+      this.offscreenEls = [];
+    }
   }
 
   frame() {
@@ -776,6 +852,7 @@ export class Game {
     }
 
     this.updatePlayer(dt);
+    this.updateProjectiles(dt);
     this.updatePrams(dt);
     this.updateWarmer(dt);
     this.updateCrib(dt);
@@ -790,10 +867,10 @@ export class Game {
     }
     if (this.carry?.kind === 'baby' && this.carry.mood === 'crying') cryingCount += 0.5;
     const drain = this.night.cryDrain * Math.max(0, cryingCount);
-    const minorDrain = needyCount * 0.11;
+    const minorDrain = needyCount * 0.09;
     this.peace -= (drain + minorDrain) * dt;
-    if (cryingCount === 0 && needyCount === 0) this.peace += 0.62 * dt;
-    else if (cryingCount === 0) this.peace += 0.16 * dt;
+    if (cryingCount === 0 && needyCount === 0) this.peace += 0.78 * dt;
+    else if (cryingCount === 0) this.peace += 0.22 * dt;
     this.peace = clamp(this.peace, 0, 100);
 
     this.chaos = clamp((cryingCount / Math.max(1, this.night.pramCount)) * 0.75 + needyCount * 0.06 + (1 - this.peace / 100) * 0.35, 0, 1);
@@ -820,7 +897,36 @@ export class Game {
     this.checkEnd();
   }
 
+  startDash() {
+    if (this.mode !== 'playing' || this.dashCooldown > 0 || this.dashTime > 0) return;
+    const forward =
+      (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) -
+      (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) +
+      this.touchMove.y;
+    const right =
+      (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
+      (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0) +
+      this.touchMove.x;
+    let dx = right;
+    let dz = -forward;
+    if (Math.hypot(dx, dz) < 0.12) {
+      dx = Math.sin(this.player.rotation.y);
+      dz = Math.cos(this.player.rotation.y);
+    }
+    const length = Math.hypot(dx, dz) || 1;
+    this.dashDirection.set(dx / length, dz / length);
+    this.dashTime = this.dashDuration;
+    this.dashCooldown = this.dashCooldownMax;
+    this.dashTrailTimer = 0;
+    this.player.rotation.y = Math.atan2(this.dashDirection.x, this.dashDirection.y);
+    this.audio.dash();
+    this.addShake(0.045);
+    this.spawnFootPuff();
+    this.updateHud(true);
+  }
+
   updatePlayer(dt) {
+    this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     const forward =
       (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) -
       (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) +
@@ -834,12 +940,24 @@ export class Game {
 
     const carryingBaby = this.carry?.kind === 'baby';
     const speed = carryingBaby ? 3.85 : this.carry?.kind === 'item' ? 4.55 : 5.15;
-    const targetX = move.x * speed;
-    const targetZ = move.y * speed;
-    this.velocityXZ.x = damp(this.velocityXZ.x, targetX, 13, dt);
-    this.velocityXZ.y = damp(this.velocityXZ.y, targetZ, 13, dt);
-    if (Math.abs(this.velocityXZ.x) < 0.02) this.velocityXZ.x = 0;
-    if (Math.abs(this.velocityXZ.y) < 0.02) this.velocityXZ.y = 0;
+    if (this.dashTime > 0) {
+      this.dashTime -= dt;
+      const dashSpeed = carryingBaby ? 7.7 : this.dashSpeed;
+      this.velocityXZ.set(this.dashDirection.x * dashSpeed, this.dashDirection.y * dashSpeed);
+      this.dashTrailTimer = (this.dashTrailTimer || 0) - dt;
+      if (this.dashTrailTimer <= 0) {
+        this.spawnFootPuff();
+        this.dashTrailTimer = 0.055;
+      }
+      this.player.rotation.y = Math.atan2(this.dashDirection.x, this.dashDirection.y);
+    } else {
+      const targetX = move.x * speed;
+      const targetZ = move.y * speed;
+      this.velocityXZ.x = damp(this.velocityXZ.x, targetX, 13, dt);
+      this.velocityXZ.y = damp(this.velocityXZ.y, targetZ, 13, dt);
+      if (Math.abs(this.velocityXZ.x) < 0.02) this.velocityXZ.x = 0;
+      if (Math.abs(this.velocityXZ.y) < 0.02) this.velocityXZ.y = 0;
+    }
 
     this.player.position.x += this.velocityXZ.x * dt;
     this.player.position.z += this.velocityXZ.y * dt;
@@ -874,6 +992,7 @@ export class Game {
   }
 
   updatePlayerAnimation(dt) {
+    this.throwAnimation = Math.max(0, this.throwAnimation - dt);
     const speed =
       this.mode === 'playing'
         ? Math.hypot(this.velocityXZ.x, this.velocityXZ.y)
@@ -885,7 +1004,12 @@ export class Game {
     this.playerParts.rightLeg.rotation.x = -legSwing;
 
     const carryingBaby = this.carry?.kind === 'baby';
-    if (carryingBaby) {
+    if (this.throwAnimation > 0) {
+      this.playerParts.leftArm.rotation.x = damp(this.playerParts.leftArm.rotation.x, -2.25, 24, dt);
+      this.playerParts.rightArm.rotation.x = damp(this.playerParts.rightArm.rotation.x, -2.25, 24, dt);
+      this.playerParts.leftArm.rotation.z = damp(this.playerParts.leftArm.rotation.z, 0.2, 18, dt);
+      this.playerParts.rightArm.rotation.z = damp(this.playerParts.rightArm.rotation.z, -0.2, 18, dt);
+    } else if (carryingBaby) {
       this.playerParts.leftArm.rotation.x = damp(this.playerParts.leftArm.rotation.x, -1.2, 12, dt);
       this.playerParts.rightArm.rotation.x = damp(this.playerParts.rightArm.rotation.x, -1.2, 12, dt);
       this.playerParts.leftArm.rotation.z = damp(this.playerParts.leftArm.rotation.z, 0.16, 10, dt);
@@ -902,6 +1026,8 @@ export class Game {
       this.playerParts.rightArm.rotation.z = damp(this.playerParts.rightArm.rotation.z, 0, 10, dt);
     }
 
+    const leanTarget = this.dashTime > 0 ? -0.14 : 0;
+    this.playerParts.bodyGroup.rotation.x = damp(this.playerParts.bodyGroup.rotation.x, leanTarget, 12, dt);
     if (this.playerParts.head) {
       this.playerParts.head.rotation.z = Math.sin(this.elapsed * 1.6) * 0.012;
       this.playerParts.head.rotation.y = Math.sin(this.elapsed * 0.8) * 0.04;
@@ -1687,17 +1813,28 @@ export class Game {
     const itemName = this.deliveryLabel(p.need);
     this.removeCarryMesh();
     this.carry = null;
+    this.completeItemDelivery(p, itemName, false);
+  }
+
+  completeItemDelivery(p, itemName, thrown = false) {
     p.state = 'calm';
     p.fuss = 0;
     p.need = null;
-    p.calmTimer = 8 + Math.random() * 4;
+    p.calmTimer = 13 + Math.random() * 5;
     p.needFlash = 0;
     this.applyPramIcon(p);
     this.audio.deliver();
-    this.registerServe(110, p);
-    this.peace = clamp(this.peace + 5.8, 0, 100);
-    this.showToast(`${p.name} got the ${itemName.toLowerCase()}. Back to sleep.`, 'good', null, 2200);
-    this.spawnConfetti(p.pram.group.position, 7);
+    this.registerServe(thrown ? 140 : 110, p);
+    this.peace = clamp(this.peace + (thrown ? 7.5 : 5.8), 0, 100);
+    this.showToast(
+      thrown
+        ? `BULLSEYE! The ${itemName.toLowerCase()} landed perfectly. ${p.name} is back asleep.`
+        : `${p.name} got the ${itemName.toLowerCase()}. Back to sleep.`,
+      'good',
+      null,
+      2200
+    );
+    this.spawnConfetti(p.pram.group.position, thrown ? 11 : 7);
     this.addShake(0.03);
     this.updateHud(true);
   }
@@ -1718,7 +1855,7 @@ export class Game {
     this.audio.pickup();
     if (!this.tipsShown.has('firstPickup')) {
       this.tipsShown.add('firstPickup');
-      this.showToast('Carry it to a pram with a matching bubble. E gives it.', 'good', type);
+      this.showToast('Carry it to a matching pram and press E — or press R to throw it.', 'good', type);
     }
     if (type === 'bottle') {
       this.showToast('Cold bottle. Warm it on the stove inside.', 'good', 'bottle', 2200);
@@ -1763,9 +1900,13 @@ export class Game {
     const crib = this.world.stations.crib;
     if (crib.state !== 'empty') return;
     const p = this.pramStates[this.carry.pramIndex];
-    const name = this.carry.name;
     this.removeCarryMesh();
     this.carry = null;
+    this.completeCribPlacement(p, false);
+  }
+
+  completeCribPlacement(p, thrown = false) {
+    const crib = this.world.stations.crib;
     crib.state = 'soothing';
     crib.timer = 0;
     crib.group.userData.baby.visible = true;
@@ -1774,7 +1915,14 @@ export class Game {
     p.state = 'soothing';
     this.applyPramIcon(p);
     this.audio.shush();
-    this.showToast(`Shhh... ${name} is being rocked to sleep.`, 'good', 'zzz', 2600);
+    this.showToast(
+      thrown
+        ? `AIRBABY! ${p.name} made it into the crib. Smooth.`
+        : `Shhh... ${p.name} is being rocked to sleep.`,
+      'good',
+      'zzz',
+      2600
+    );
     this.peace = clamp(this.peace + 2.5, 0, 100);
     this.updateOrderCard(p, true);
     this.updateHud(true);
@@ -1811,23 +1959,34 @@ export class Game {
     const name = this.carry.name;
     this.removeCarryMesh();
     this.carry = null;
+    this.completeTuck(p, name, false);
+  }
+
+  completeTuck(p, name, thrown = false) {
     p.state = 'calm';
     p.fuss = 0;
     p.need = null;
     p.carryMood = null;
-    p.calmTimer = 10 + Math.random() * 5;
+    p.calmTimer = 14 + Math.random() * 5;
     p.pram.group.userData.babyGroup.visible = true;
     p.pram.arrow.visible = false;
     p.pram.highlight.group.visible = false;
     this.applyPramIcon(p);
     this.audio.tuck();
-    this.registerServe(260, p);
+    this.registerServe(thrown ? 310 : 260, p);
     this.peace = clamp(this.peace + 12, 0, 100);
     this.tucks += 1;
-    this.spawnConfetti(p.pram.group.position, 18);
+    this.spawnConfetti(p.pram.group.position, thrown ? 23 : 18);
     this.flashScreen('#ffe8b8', 0.26);
     this.addShake(0.1);
-    this.showToast(`${name} is tucked in. Peace restored (mostly).`, 'good', 'zzz', 2400);
+    this.showToast(
+      thrown
+        ? `SWISH! ${name} landed back in their own pram. Show-off.`
+        : `${name} is tucked in. Peace restored (mostly).`,
+      'good',
+      'zzz',
+      2400
+    );
     this.updateOrderCard(p, true);
     this.updateHud(true);
   }
@@ -1846,6 +2005,208 @@ export class Game {
     this.carry = null;
     this.audio.drop();
     this.updateHud(true);
+  }
+
+  getThrowTarget() {
+    if (!this.carry) return null;
+    const range = 18.0;
+    if (this.carry.kind === 'item') {
+      let best = null;
+      let bestDistance = Infinity;
+      for (const p of this.pramStates) {
+        if (p.state !== 'needy' || p.need !== this.carry.type) continue;
+        if (p.need === 'bottle' && !this.carry.warm) continue;
+        const d = this.player.position.distanceTo(p.pram.group.position);
+        if (d <= range && d < bestDistance) {
+          best = p;
+          bestDistance = d;
+        }
+      }
+      if (!best) return null;
+      return {
+        kind: 'pram',
+        pram: best,
+        point: best.pram.group.position.clone().add(new THREE.Vector3(0, 1.35, 0.1)),
+        label: best.name,
+      };
+    }
+    if (this.carry.kind === 'baby') {
+      if (this.carry.mood === 'crying') {
+        const crib = this.world.stations.crib;
+        if (crib.state === 'empty' && this.player.position.distanceTo(crib.position) <= range) {
+          return {
+            kind: 'crib',
+            station: crib,
+            pram: this.pramStates[this.carry.pramIndex],
+            point: crib.position.clone().add(new THREE.Vector3(0, 1.25, 0.1)),
+            label: 'the crib',
+          };
+        }
+        return null;
+      }
+      if (this.carry.mood === 'ready') {
+        const p = this.pramStates[this.carry.pramIndex];
+        if (p && this.player.position.distanceTo(p.pram.group.position) <= range) {
+          return {
+            kind: 'pram',
+            pram: p,
+            point: p.pram.group.position.clone().add(new THREE.Vector3(0, 1.35, 0.1)),
+            label: p.name,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  throwCarried() {
+    if (this.mode !== 'playing' || !this.carry?.mesh) return;
+    const carry = this.carry;
+    const target = this.getThrowTarget();
+    this.player.updateMatrixWorld(true);
+    const start = new THREE.Vector3();
+    carry.mesh.getWorldPosition(start);
+    start.y += 0.12;
+    const mesh = carry.mesh;
+    this.scene.attach(mesh);
+    mesh.position.copy(start);
+
+    let end;
+    let targetKind = null;
+    let targetPram = null;
+    let targetStation = null;
+    let targetLabel = 'the snow';
+    if (target) {
+      end = target.point.clone();
+      targetKind = target.kind;
+      targetPram = target.pram || null;
+      targetStation = target.station || null;
+      targetLabel = target.label;
+      this.player.rotation.y = Math.atan2(end.x - this.player.position.x, end.z - this.player.position.z);
+    } else {
+      const facingX = Math.sin(this.player.rotation.y);
+      const facingZ = Math.cos(this.player.rotation.y);
+      end = new THREE.Vector3(this.player.position.x + facingX * 4.2, 0.35, this.player.position.z + facingZ * 4.2);
+    }
+
+    const distance = start.distanceTo(end);
+    const duration = clamp(0.38 + distance * 0.038, 0.42, 0.92);
+    this.projectiles.push({
+      mesh,
+      kind: carry.kind,
+      type: carry.type,
+      warm: carry.warm,
+      pramIndex: carry.pramIndex,
+      name: carry.name,
+      mood: carry.mood,
+      targetKind,
+      targetPram,
+      targetStation,
+      targetLabel,
+      start,
+      end,
+      elapsed: 0,
+      duration,
+      arc: 1.25 + distance * 0.13,
+      spin: (Math.random() - 0.5) * 8,
+    });
+    this.carry = null;
+    this.throwAnimation = 0.36;
+    this.audio.whoosh();
+    if (carry.kind === 'baby' && carry.mood === 'crying') this.audio.cry(carry.pramIndex, 0.65);
+    this.addShake(0.06);
+    this.showScorePopupAt(start, carry.kind === 'baby' ? 'YEET!' : 'THROW!', 'soft');
+    if (!target) {
+      this.showToast(
+        carry.kind === 'baby'
+          ? 'No safe target! Inger, do NOT throw that baby!'
+          : `No target nearby — the ${this.deliveryLabel(carry.type).toLowerCase()} is gone.`,
+        'urgent',
+        'warning',
+        2400
+      );
+    }
+    this.updateHud(true);
+  }
+
+  updateProjectiles(dt) {
+    for (let i = this.projectiles.length - 1; i >= 0; i -= 1) {
+      const projectile = this.projectiles[i];
+      if (!projectile) continue;
+      projectile.elapsed += dt;
+      const t = Math.min(1, projectile.elapsed / projectile.duration);
+      const eased = t * t * (3 - 2 * t);
+      projectile.mesh.position.lerpVectors(projectile.start, projectile.end, eased);
+      projectile.mesh.position.y += Math.sin(t * Math.PI) * projectile.arc;
+      projectile.mesh.rotation.x += dt * 8;
+      projectile.mesh.rotation.z += dt * projectile.spin;
+      if (t >= 1) {
+        this.removeProjectileMesh(projectile);
+        this.projectiles.splice(i, 1);
+        this.resolveThrow(projectile);
+      }
+    }
+  }
+
+  resolveThrow(projectile) {
+    if (projectile.kind === 'item') {
+      const p = projectile.targetPram;
+      if (
+        projectile.targetKind === 'pram' &&
+        p &&
+        p.state === 'needy' &&
+        p.need === projectile.type &&
+        (projectile.type !== 'bottle' || projectile.warm)
+      ) {
+        this.completeItemDelivery(p, this.deliveryLabel(projectile.type), true);
+        this.spawnConfetti(projectile.end, 8);
+      } else {
+        this.audio.error();
+        this.showToast(`Missed! The ${this.deliveryLabel(projectile.type).toLowerCase()} is lost in the snow.`, 'bad', projectile.type, 2200);
+      }
+      return;
+    }
+
+    const p = projectile.targetPram;
+    let success = false;
+    if (projectile.targetKind === 'crib' && p) {
+      const crib = this.world.stations.crib;
+      if (crib.state === 'empty' && p.state === 'carried' && projectile.mood === 'crying') {
+        this.completeCribPlacement(p, true);
+        success = true;
+      }
+    } else if (projectile.targetKind === 'pram' && p) {
+      if (p.state === 'carried' && projectile.mood === 'ready') {
+        this.completeTuck(p, projectile.name, true);
+        success = true;
+      }
+    }
+    if (!success) this.babyThrowMiss(p, projectile.name, projectile.targetLabel);
+  }
+
+  babyThrowMiss(pram, name, targetLabel) {
+    this.failureReason = 'babyThrow';
+    this.missedBabyName = name;
+    this.missedTargetLabel = targetLabel;
+    this.addShake(1);
+    this.flashScreen('#e84a5f', 0.5);
+    this.audio.error();
+    this.showScorePopupAt(this.player.position, 'MISS!', 'bad');
+    this.endShift(false);
+  }
+
+  removeProjectileMesh(projectile) {
+    if (!projectile.mesh) return;
+    this.scene.remove(projectile.mesh);
+    projectile.mesh.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+    });
+    projectile.mesh = null;
+  }
+
+  clearProjectiles() {
+    for (const projectile of this.projectiles) this.removeProjectileMesh(projectile);
+    this.projectiles = [];
   }
 
   removeCarryMesh() {
@@ -1883,7 +2244,7 @@ export class Game {
     this.soothed += 1;
     this.combo = Math.min(6, this.combo + 1);
     this.bestCombo = Math.max(this.bestCombo, comboMultiplier);
-    this.comboTimer = 9;
+    this.comboTimer = 11;
     const label = comboMultiplier > 1 ? `+${points}  ×${comboMultiplier}` : `+${points}`;
     this.showScorePopup(p, label, '');
     if (this.combo > 2) {
@@ -2008,6 +2369,7 @@ export class Game {
       p.mesh.material.dispose();
     }
     this.particles = [];
+    this.offscreenEls = [];
   }
 
   updateProgressBars() {
@@ -2060,7 +2422,93 @@ export class Game {
       this.dom.handContent.innerHTML = `<img class="pixel-icon" src="${getIconDataUrl(this.carry.mood === 'ready' ? 'zzz' : 'cry')}" alt="" /> ${label}`;
     }
 
+    if (this.dom.handThrow) {
+      if (!this.carry) {
+        this.dom.handThrow.classList.add('hidden');
+      } else {
+        const target = this.getThrowTarget();
+        this.dom.handThrow.classList.remove('hidden');
+        this.dom.handThrow.classList.toggle('danger', !target);
+        this.dom.handThrow.innerHTML = target
+          ? `<span class="throw-key">R</span> THROW → ${target.label}`
+          : `<span class="throw-key">R</span> THROW → ${this.carry.kind === 'baby' ? 'MISS!' : 'NO TARGET'}`;
+      }
+    }
+    if (this.dom.dashBtn) {
+      const cooling = this.dashCooldown > 0 || this.dashTime > 0;
+      this.dom.dashBtn.classList.toggle('cooldown', cooling);
+      this.dom.dashBtn.setAttribute('aria-disabled', String(cooling));
+    }
+    if (this.dom.touchThrow) {
+      this.dom.touchThrow.classList.toggle('disabled', !this.carry);
+      this.dom.touchThrow.setAttribute('aria-disabled', String(!this.carry));
+    }
+
     for (const p of this.pramStates) this.updateOrderCard(p, force);
+    this.updateOffscreenMarkers();
+  }
+
+  updateOffscreenMarkers() {
+    if (!this.offscreenEls.length || !this.dom.offscreenMarkers) return;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const portrait = this.isPortrait;
+    const topSafe = portrait ? 168 : 154;
+    const bottomSafe = portrait ? 155 : 136;
+    const sideSafe = portrait ? 30 : 26;
+    const canShow = this.mode === 'playing' || this.mode === 'paused';
+    const playerIsHoldingBaby = this.carry?.kind === 'baby';
+
+    for (let i = 0; i < this.offscreenEls.length; i += 1) {
+      const entry = this.offscreenEls[i];
+      const p = this.pramStates[i];
+      if (!entry || !p) continue;
+      const targetReady = playerIsHoldingBaby && this.carry.pramIndex === p.index && this.carry.mood === 'ready';
+      const relevant = p.state === 'crying' || p.state === 'needy' || targetReady;
+      if (!canShow || !relevant) {
+        entry.el.classList.remove('show');
+        continue;
+      }
+
+      const worldPos = p.pram.group.position.clone();
+      worldPos.y = 2.45;
+      const projected = worldPos.project(this.camera);
+      const px = (projected.x * 0.5 + 0.5) * width;
+      const py = (-projected.y * 0.5 + 0.5) * height;
+      const onScreen = px > sideSafe && px < width - sideSafe && py > topSafe && py < height - bottomSafe;
+
+      let icon = 'zzz';
+      let cls = 'ready';
+      if (p.state === 'crying') {
+        icon = 'cry';
+        cls = 'crying';
+      } else if (p.state === 'needy' && p.need) {
+        icon = p.need;
+        cls = 'needy';
+      }
+
+      if (onScreen) {
+        entry.el.classList.remove('show');
+        continue;
+      }
+
+      const x = clamp(px, sideSafe, width - sideSafe);
+      const y = clamp(py, topSafe, height - bottomSafe);
+      entry.el.style.left = `${x}px`;
+      entry.el.style.top = `${y}px`;
+      const angle = Math.atan2(x - width / 2, -(y - height / 2));
+      entry.orbit.style.transform = `rotate(${angle}rad)`;
+      if (entry.lastIcon !== icon) {
+        entry.icon.src = getIconDataUrl(icon);
+        entry.lastIcon = icon;
+      }
+      if (entry.lastClass !== cls) {
+        entry.el.classList.remove('crying', 'needy', 'ready');
+        entry.el.classList.add(cls);
+        entry.lastClass = cls;
+      }
+      entry.el.classList.add('show');
+    }
   }
 
   updateOrderCard(p, force = false) {
@@ -2129,8 +2577,20 @@ export class Game {
     const sx = (Math.random() - 0.5) * 0.55 * shake;
     const sy = (Math.random() - 0.5) * 0.33 * shake;
     const sz = (Math.random() - 0.5) * 0.18 * shake;
-    this.camera.position.set(this.cameraBase.x + sx, this.cameraBase.y + sy, this.cameraBase.z + sz);
-    this.camera.lookAt(this.cameraTarget.x + sx * 0.5, this.cameraTarget.y + sy * 0.5, this.cameraTarget.z + sz * 0.5);
+
+    if (this.isPortrait) {
+      const lookAheadX = this.velocityXZ.x * 0.22;
+      const desiredX = clamp(this.player.position.x + lookAheadX, -7.4, 7.4);
+      const desiredZ = Math.min(0.9, this.player.position.z + 1.0);
+      this.cameraFocus.x = damp(this.cameraFocus.x, desiredX, 5.5, dt);
+      this.cameraFocus.z = damp(this.cameraFocus.z, desiredZ, 5.5, dt);
+      const focus = this.cameraFocus;
+      this.camera.position.set(focus.x + sx, 15.9 + sy, focus.z + 17.6 + sz);
+      this.camera.lookAt(focus.x + sx * 0.4, 0.2 + sy * 0.4, focus.z + sz * 0.4);
+    } else {
+      this.camera.position.set(this.cameraBase.x + sx, this.cameraBase.y + sy, this.cameraBase.z + sz);
+      this.camera.lookAt(this.cameraTarget.x + sx * 0.5, this.cameraTarget.y + sy * 0.5, this.cameraTarget.z + sz * 0.5);
+    }
   }
 
   addShake(amount) {
@@ -2183,6 +2643,7 @@ export class Game {
     this.dom.chaosFrame.classList.remove('on');
     this.audio.setMusicPaused(true);
     this.clearCarryVisual();
+    this.clearProjectiles();
     this.keys.clear();
     this.touchMove.x = 0;
     this.touchMove.y = 0;
@@ -2217,13 +2678,22 @@ export class Game {
     this.dom.screenResults.classList.remove('hidden');
     this.dom.screenResults.classList.toggle('success', survived);
     this.dom.screenResults.classList.toggle('failed', !survived);
-    this.dom.resultsEyebrow.textContent = survived ? 'SHIFT COMPLETE' : 'SHIFT OVER';
-    this.dom.resultsTitle.textContent = survived ? (this.nightIndex === NIGHTS.length - 1 ? 'A HERO’S GOLDEN HOUR.' : 'GOLDEN HOUR.') : 'THE NEIGHBOURS CALLED.';
-    this.dom.resultsFlavor.textContent = survived
-      ? this.nightIndex === NIGHTS.length - 1
-        ? 'Three shifts. One very tired babysitter. Every pram still standing.'
-        : 'The street survived the afternoon. The babies did not notice. The fox is sulking.'
-      : 'Someone saw the fox. And the wailing. Mostly the wailing.';
+    const babyThrowMiss = !survived && this.failureReason === 'babyThrow';
+    this.dom.resultsEyebrow.textContent = babyThrowMiss ? 'SHIFT ENDED · YEET FAILED' : survived ? 'SHIFT COMPLETE' : 'SHIFT OVER';
+    this.dom.resultsTitle.textContent = babyThrowMiss
+      ? 'BUTTERFINGERS.'
+      : survived
+        ? this.nightIndex === NIGHTS.length - 1
+          ? 'A HERO’S GOLDEN HOUR.'
+          : 'GOLDEN HOUR.'
+        : 'THE NEIGHBOURS CALLED.';
+    this.dom.resultsFlavor.textContent = babyThrowMiss
+      ? `Inger threw ${this.missedBabyName} toward ${this.missedTargetLabel} and missed. Gjerdrum will never let her forget it.`
+      : survived
+        ? this.nightIndex === NIGHTS.length - 1
+          ? 'Three shifts. Inger is still standing. Every pram in Gjerdrum still standing, too.'
+          : 'Gjerdrum survived the afternoon. The babies did not notice. The fox is sulking.'
+        : 'Gjerdrum saw the fox. And the wailing. Mostly the wailing.';
     this.dom.resultsStars.innerHTML = [0, 1, 2]
       .map((i) => `<span class="result-star ${i < stars ? 'earned' : ''}">★</span>`)
       .join('');
@@ -2310,8 +2780,8 @@ export class Game {
     this.dom.screenHelp.classList.remove('hidden');
     if (this.dom.helpControls) {
       this.dom.helpControls.innerHTML = window.matchMedia('(pointer: coarse)').matches
-        ? '<span><b>STICK</b><small>MOVE</small></span><span><b>E</b><small>INTERACT</small></span><span><b>Q</b><small>DROP</small></span><span><b>❚❚</b><small>PAUSE</small></span>'
-        : '<span><b>WASD / ARROWS</b><small>WADDLE</small></span><span><b>E / SPACE</b><small>INTERACT</small></span><span><b>Q</b><small>DROP</small></span><span><b>ESC / P</b><small>PAUSE</small></span><span><b>M</b><small>MUTE</small></span>';
+        ? '<span><b>STICK</b><small>MOVE</small></span><span><b>E</b><small>INTERACT</small></span><span><b>Q</b><small>DROP</small></span><span><b>THROW</b><small>YEET</small></span><span><b>ϟ</b><small>DASH</small></span><span><b>❚❚</b><small>PAUSE</small></span>'
+        : '<span><b>WASD / ARROWS</b><small>WADDLE</small></span><span><b>E / SPACE</b><small>INTERACT</small></span><span><b>Q</b><small>DROP</small></span><span><b>SHIFT</b><small>DASH</small></span><span><b>R</b><small>THROW</small></span><span><b>ESC / P</b><small>PAUSE</small></span><span><b>M</b><small>MUTE</small></span>';
     }
     this.dom.prompt.classList.add('hidden');
     this.dom.countdown.classList.add('hidden');
