@@ -3527,3 +3527,37 @@ button:focus-visible {
     font-size: 19px;
   }
 }
+
+/* Escaped babies */
+.order-card.wandering {
+  background: #ffe4ec;
+  border-color: var(--red);
+  animation: wandering-card 0.7s ease-in-out infinite alternate;
+}
+.order-card.wandering .order-state,
+.order-card.wandering .order-need-label {
+  color: var(--red);
+}
+.order-card.lost {
+  background: #e8e1dc;
+  border-color: #8b7f83;
+  opacity: 0.62;
+  filter: grayscale(0.7);
+}
+.order-card.lost .order-state,
+.order-card.lost .order-need-label {
+  color: #6f5e64;
+}
+@keyframes wandering-card {
+  from { box-shadow: 0 4px 0 rgba(39, 32, 60, 0.8); }
+  to { box-shadow: 0 4px 0 rgba(39, 32, 60, 0.8), 0 0 0 4px rgba(232, 74, 95, 0.12); }
+}
+.offscreen-marker.wandering {
+  border-color: var(--red);
+  background: #ffe4ec;
+  animation: wandering-marker 0.55s ease-in-out infinite alternate;
+}
+@keyframes wandering-marker {
+  from { transform: scale(1); }
+  to { transform: scale(1.12); }
+}

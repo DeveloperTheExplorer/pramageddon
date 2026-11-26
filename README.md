@@ -12,6 +12,7 @@ There are no shifts or finish lines now. Every run is one endless arcade attempt
 - As the run heats up, needs bite faster, calm periods get shorter, foxes get bolder, and the music speeds up and adds layers.
 - Crying drains **Neighbourhood Peace**. At zero, the run ends and your score goes on the board.
 - **Crib already full?** Put the crying baby back in their own pram with **E** (or **Q** while beside it), then come back when the crib is free. The game now marks that pram and gives you a clear return prompt, so a full crib can never leave you stuck holding a baby.
+- **Escapees!** Calm pram babies and crib babies sometimes climb out and waddle off. They get an alarm marker, a moving off-screen locator, and a countdown on their pram card. Catch them with **E** before they leave Gjerdrum. If they get away, you lose **28 Peace** and that pram is lost for the run.
 - Throwing is manual: face a pram/crib and watch the ground arrow. It turns **mint** when you are aimed at a valid target, red when you are not. `R` or **THROW** sends whatever is in Inger's hands in that direction. Miss a baby throw and the run ends immediately.
 - **Dash** with `Shift` or the lightning button (or double-tap the joystick) to cross the yard.
 - **Bottle warmer:** a persistent HUD bar shows the warming countdown from anywhere, then flips to **READY · E**. The floating station icon is hidden while the warmer is in use so it never covers the bottle or progress bar.

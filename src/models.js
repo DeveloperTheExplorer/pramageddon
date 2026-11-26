@@ -520,6 +520,37 @@ export function createBabyBundle(color = '#f6d365', nameColor = '#ff9ec7') {
   return group;
 }
 
+export function createWanderingBaby(color = '#f6d365') {
+  const group = new THREE.Group();
+  const skin = '#f6c99f';
+  const body = rounded(0.4, 0.46, 0.3, color, 0.12);
+  body.position.y = 0.43;
+  const bib = rounded(0.3, 0.22, 0.025, '#fff6df', 0.03);
+  bib.position.set(0, 0.52, 0.16);
+  bib.rotation.x = -0.12;
+  const head = createBabyFace(color);
+  head.position.y = 0.82;
+  head.scale.setScalar(0.88);
+  const leftArm = cyl(0.06, 0.05, 0.3, 5, skin);
+  leftArm.position.set(-0.25, 0.53, 0);
+  leftArm.rotation.z = 0.62;
+  const rightArm = cyl(0.06, 0.05, 0.3, 5, skin);
+  rightArm.position.set(0.25, 0.53, 0);
+  rightArm.rotation.z = -0.62;
+  const leftLeg = cyl(0.07, 0.055, 0.3, 5, skin);
+  leftLeg.position.set(-0.11, 0.18, 0.02);
+  const rightLeg = cyl(0.07, 0.055, 0.3, 5, skin);
+  rightLeg.position.set(0.11, 0.18, 0.02);
+  const leftFoot = sphere(0.085, color, { widthSeg: 6, heightSeg: 4 });
+  leftFoot.position.set(-0.11, 0.035, 0.08);
+  const rightFoot = sphere(0.085, color, { widthSeg: 6, heightSeg: 4 });
+  rightFoot.position.set(0.11, 0.035, 0.08);
+  group.add(body, bib, head, leftArm, rightArm, leftLeg, rightLeg, leftFoot, rightFoot);
+  group.userData = { body, head, leftArm, rightArm, leftLeg, rightLeg, leftFoot, rightFoot };
+  group.scale.setScalar(0.98);
+  return group;
+}
+
 export function createItem(type) {
   const g = new THREE.Group();
   if (type === 'pacifier') {

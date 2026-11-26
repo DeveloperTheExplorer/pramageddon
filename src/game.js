@@ -4,6 +4,7 @@ import {
   createPlayer,
   createItem,
   createBabyBundle,
+  createWanderingBaby,
   makeIconTexture,
   makeIconSprite,
   makeNameTag,
@@ -163,6 +164,9 @@ export class Game {
     this.offscreenEls = [];
     this.fox = null;
     this.foxTimer = 999;
+    this.wanderingBaby = null;
+    this.escapeCheckTimer = 30 + Math.random() * 10;
+    this.escapeCooldown = 0;
     this.birdTimer = 8 + Math.random() * 7;
     this.cribOccupant = null;
     this.tipsShown = new Set();
@@ -592,6 +596,7 @@ export class Game {
       if (station.icon) station.icon.visible = false;
     }
     this.clearCarryVisual();
+    this.clearWandering();
     this.carry = null;
     this.clearCrib();
     this.resetWarmer();
@@ -719,7 +724,10 @@ export class Game {
     this.nextPramAt = ARCADE.addPramAt[0] ?? null;
     this.activePramCount = ARCADE.startPrams;
     this.moodIndex = 0;
+    this.clearWandering();
     this.clearProjectiles();
+    this.escapeCheckTimer = 30 + Math.random() * 10;
+    this.escapeCooldown = 0;
     this.foxTimer = ARCADE.firstFoxAt;
     this.birdTimer = 7 + Math.random() * 8;
     this.fox = null;
@@ -809,6 +817,233 @@ export class Game {
     this.aimTarget = null;
   }
 
+  clearWandering() {
+    if (!this.wanderingBaby) return;
+    const mesh = this.wanderingBaby.mesh;
+    this.scene.remove(mesh);
+    mesh.traverse((child) => {
+      if (child.isMesh && child.geometry) child.geometry.dispose();
+    });
+    this.wanderingBaby = null;
+  }
+
+  tryStartEscape() {
+    if (this.wanderingBaby || this.elapsedShift < 30) return;
+    const crib = this.world.stations.crib;
+    const cribState = this.findPramState(this.cribOccupant);
+    const cribEligible =
+      cribState &&
+      (cribState.state === 'soothing' || cribState.state === 'ready') &&
+      (crib.state === 'soothing' || crib.state === 'ready');
+    const pramCandidates = this.pramStates.filter((p) => p.state === 'calm');
+    if (!cribEligible && !pramCandidates.length) return;
+    const chance = clamp(0.45 + (this.intensity - 1) * 0.1, 0.45, 0.65);
+    if (Math.random() > chance) return;
+    if (cribEligible && (Math.random() < 0.45 || !pramCandidates.length)) {
+      this.beginWandering(cribState, 'crib');
+    } else {
+      const p = pramCandidates[Math.floor(Math.random() * pramCandidates.length)];
+      this.beginWandering(p, 'pram');
+    }
+  }
+
+  beginWandering(p, from) {
+    if (!p || this.wanderingBaby) return;
+    if (p.state !== 'calm' && p.state !== 'soothing' && p.state !== 'ready') return;
+    const crib = this.world.stations.crib;
+    let start;
+    if (from === 'crib') {
+      this.clearCrib();
+      start = crib.position.clone();
+      start.x += 0.55;
+      start.z += 0.9;
+    } else {
+      start = p.pram.group.position.clone();
+      start.z += 0.85;
+    }
+    p.state = 'wandering';
+    p.need = null;
+    p.carryMood = null;
+    p.shake = 0;
+    p.fuss = 0;
+    p.pram.group.userData.babyGroup.visible = false;
+    p.pram.icon.visible = true;
+    this.applyPramIcon(p);
+
+    const mesh = createWanderingBaby(PRAM_COLORS[p.index].blanket);
+    mesh.position.set(start.x, 0, start.z);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    this.scene.add(mesh);
+    const tag = makeNameTag(p.name, PRAM_COLORS[p.index].trim);
+    tag.position.set(0, 1.48, 0);
+    tag.scale.set(0.9, 0.34, 1);
+    mesh.add(tag);
+    const alert = makeIconSprite('warning', { scale: 0.44, bg: '#ff9ec7' });
+    alert.position.set(0, 1.92, 0);
+    mesh.add(alert);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.72, 24),
+      new THREE.MeshBasicMaterial({ color: '#ff9ec7', transparent: true, opacity: 0.78, depthWrite: false, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.04;
+    mesh.add(ring);
+
+    const duration = from === 'crib' ? 18 : 22;
+    this.wanderingBaby = {
+      pramIndex: p.index,
+      name: p.name,
+      from,
+      mesh,
+      tag,
+      alert,
+      ring,
+      escapeTimer: duration,
+      maxEscapeTimer: duration,
+      speed: 1.05 + Math.random() * 0.32,
+      phase: Math.random() * Math.PI * 2,
+      retarget: 0,
+      target: new THREE.Vector2(),
+      bounds:
+        from === 'crib'
+          ? { minX: -5.8, maxX: 1.8, minZ: -8.2, maxZ: -2.6 }
+          : { minX: -9.6, maxX: 9.6, minZ: 1.2, maxZ: 9.2 },
+    };
+    this.pickWanderTarget();
+    this.escapeCheckTimer = 28 + Math.random() * 10;
+    this.audio.cry(p.index, 1);
+    this.addShake(0.18);
+    this.flashScreen('#ffd166', 0.18);
+    this.showToast(
+      `${p.name} climbed out of the ${from === 'crib' ? 'crib' : 'pram'}! Catch them before they wander off!`,
+      'urgent',
+      'warning',
+      3800
+    );
+    this.updateOrderCard(p, true);
+    this.updateHud(true);
+  }
+
+  pickWanderTarget() {
+    const w = this.wanderingBaby;
+    if (!w) return;
+    const b = w.bounds;
+    const pos = w.mesh.position;
+    let x = pos.x;
+    let z = pos.z;
+    for (let i = 0; i < 6; i += 1) {
+      x = b.minX + Math.random() * (b.maxX - b.minX);
+      z = b.minZ + Math.random() * (b.maxZ - b.minZ);
+      if (Math.hypot(x - pos.x, z - pos.z) > 1.2) break;
+    }
+    w.target.set(x, z);
+    w.retarget = 1.7 + Math.random() * 2.2;
+  }
+
+  updateWandering(dt) {
+    const w = this.wanderingBaby;
+    if (!w) return;
+    w.escapeTimer -= dt;
+    if (w.escapeTimer <= 0) {
+      this.loseWandering();
+      return;
+    }
+    w.retarget -= dt;
+    const pos = w.mesh.position;
+    const dx = w.target.x - pos.x;
+    const dz = w.target.y - pos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 0.22 || w.retarget <= 0) {
+      this.pickWanderTarget();
+    } else {
+      const step = Math.min(w.speed * dt, dist);
+      const next = pos.clone();
+      next.x += (dx / dist) * step;
+      next.z += (dz / dist) * step;
+      this.resolveCollisions(next);
+      next.x = clamp(next.x, w.bounds.minX, w.bounds.maxX);
+      next.z = clamp(next.z, w.bounds.minZ, w.bounds.maxZ);
+      pos.x = next.x;
+      pos.z = next.z;
+      w.mesh.rotation.y = Math.atan2(dx, dz);
+      w.phase += dt * (7 + w.speed * 2);
+    }
+    const swing = Math.sin(w.phase) * 0.55;
+    const ud = w.mesh.userData;
+    if (ud.leftLeg) ud.leftLeg.rotation.x = swing;
+    if (ud.rightLeg) ud.rightLeg.rotation.x = -swing;
+    if (ud.leftArm) ud.leftArm.rotation.x = -swing * 0.7;
+    if (ud.rightArm) ud.rightArm.rotation.x = swing * 0.7;
+    if (ud.body) ud.body.position.y = 0.43 + Math.abs(Math.sin(w.phase)) * 0.035;
+    if (ud.head) ud.head.rotation.z = Math.sin(w.phase * 0.7) * 0.08;
+    w.alert.position.y = 1.92 + Math.sin(this.elapsed * 6) * 0.08;
+    w.tag.position.y = 1.48 + Math.sin(this.elapsed * 4) * 0.04;
+    w.ring.material.opacity = 0.55 + Math.sin(this.elapsed * 7) * 0.22;
+    w.ring.scale.setScalar(1 + Math.sin(this.elapsed * 5) * 0.08);
+    if (w.escapeTimer <= 5) {
+      w.alert.material.opacity = 0.55 + Math.sin(this.elapsed * 14) * 0.35;
+    }
+    const p = this.findPramState(w.pramIndex);
+    if (p) this.updateOrderCard(p, false);
+  }
+
+  catchWanderingBaby() {
+    const w = this.wanderingBaby;
+    if (!w || this.mode !== 'playing' || this.carry) return;
+    if (this.player.position.distanceTo(w.mesh.position) > 2.2) return;
+    const p = this.findPramState(w.pramIndex);
+    if (!p) return;
+    const name = w.name;
+    this.clearWandering();
+    p.state = 'carried';
+    p.carryMood = 'crying';
+    p.cryTimer = 0.6;
+    p.shake = 0;
+    p.need = null;
+    this.applyPramIcon(p);
+    this.carry = {
+      kind: 'baby',
+      type: 'baby',
+      pramIndex: p.index,
+      name,
+      mood: 'crying',
+      mesh: null,
+    };
+    this.attachBabyMesh(p);
+    this.escapeCooldown = 24 + Math.random() * 10;
+    this.audio.pickup();
+    this.flashScreen('#7ee0c3', 0.18);
+    this.showToast(`Caught ${name}! Now get them to the crib.`, 'good', 'heart', 2400);
+    this.updateOrderCard(p, true);
+    this.updateHud(true);
+  }
+
+  loseWandering() {
+    const w = this.wanderingBaby;
+    if (!w) return;
+    const p = this.findPramState(w.pramIndex);
+    const name = w.name;
+    this.clearWandering();
+    if (p) {
+      p.state = 'lost';
+      p.need = null;
+      p.carryMood = null;
+      p.fuss = 0;
+      p.pram.group.userData.babyGroup.visible = false;
+      p.pram.icon.visible = true;
+      this.applyPramIcon(p);
+      this.updateOrderCard(p, true);
+    }
+    this.peace = clamp(this.peace - 28, 0, 100);
+    this.escapeCooldown = 30 + Math.random() * 12;
+    this.addShake(0.65);
+    this.flashScreen('#e84a5f', 0.32);
+    this.audio.error();
+    this.audio.cry(p?.index ?? 0, 1);
+    this.showToast(`${name} wandered out of Gjerdrum. Peace -28.`, 'bad', 'warning', 3600);
+    this.updateHud(true);
+  }
+
   addNextPram() {
     if (this.pramStates.length >= ARCADE.maxPrams) return;
     const slot = this.nextPramSlot;
@@ -860,16 +1095,21 @@ export class Game {
         </div>`
       )
       .join('');
-    this.cardEls = [...this.dom.orderRail.querySelectorAll('.order-card')].map((el) => ({
-      el,
-      icon: el.querySelector('img'),
-      state: el.querySelector('.order-state'),
-      bar: el.querySelector('.fuss-fill'),
-      label: el.querySelector('.order-need-label'),
-      lastName: '',
-      lastState: '',
-      lastIcon: '',
-    }));
+    this.cardEls = [];
+    for (const p of this.pramStates) {
+      const el = this.dom.orderRail.querySelector(`.order-card[data-pram="${p.index}"]`);
+      if (!el) continue;
+      this.cardEls[p.index] = {
+        el,
+        icon: el.querySelector('img'),
+        state: el.querySelector('.order-state'),
+        bar: el.querySelector('.fuss-fill'),
+        label: el.querySelector('.order-need-label'),
+        lastName: '',
+        lastState: '',
+        lastIcon: '',
+      };
+    }
 
     if (this.dom.offscreenMarkers) {
       this.dom.offscreenMarkers.innerHTML = this.pramStates
@@ -971,6 +1211,7 @@ export class Game {
     this.updateAimHelper();
     this.updateProjectiles(dt);
     this.updatePrams(dt);
+    this.updateWandering(dt);
     this.updateWarmer(dt);
     this.updateCrib(dt);
     this.updateFox(dt);
@@ -1046,6 +1287,14 @@ export class Game {
     if (targetMood !== this.moodIndex) {
       this.moodIndex = targetMood;
       this.world.setShiftMood(targetMood);
+    }
+    if (this.escapeCooldown > 0) this.escapeCooldown -= dt;
+    if (!this.wanderingBaby && this.escapeCooldown <= 0) {
+      this.escapeCheckTimer -= dt;
+      if (this.escapeCheckTimer <= 0) {
+        this.escapeCheckTimer = 24 + Math.random() * 12;
+        this.tryStartEscape();
+      }
     }
   }
 
@@ -1303,7 +1552,11 @@ export class Game {
     let key = 'zzz';
     let opacity = 0.8;
     let scale = 0.62;
-    if (p.state === 'needy' && p.need) {
+    if (p.state === 'wandering' || p.state === 'lost') {
+      key = 'warning';
+      opacity = 1;
+      scale = 0.7;
+    } else if (p.state === 'needy' && p.need) {
       key = p.need;
       opacity = 1;
       scale = 0.7;
@@ -1355,7 +1608,7 @@ export class Game {
           p.pram.icon.scale.setScalar(0.7 + Math.sin(this.elapsed * 3.4) * 0.018);
         }
       }
-      userData.babyGroup.visible = !['carried', 'soothing', 'ready'].includes(p.state);
+      userData.babyGroup.visible = !['carried', 'soothing', 'ready', 'wandering', 'lost'].includes(p.state);
       if (p.state === 'carried' || p.state === 'soothing' || p.state === 'ready') {
         p.pram.icon.visible = false;
       } else if (!isCrying) {
@@ -1636,6 +1889,26 @@ export class Game {
       }
     }
 
+    if (this.wanderingBaby) {
+      const d = playerPos.distanceTo(this.wanderingBaby.mesh.position);
+      if (d < 2.15) {
+        const candidate = {
+          type: 'wander',
+          distance: d,
+          action: 'catchWanderingBaby',
+          label: this.carry
+            ? `Hands full — drop it to catch ${this.wanderingBaby.name}`
+            : `Catch ${this.wanderingBaby.name}!`,
+          enabled: !this.carry,
+          highlight: null,
+        };
+        if (!best || d < bestDist) {
+          best = candidate;
+          bestDist = d;
+        }
+      }
+    }
+
     if (this.fox) {
       const d = playerPos.distanceTo(this.world.fox.position);
       if (d < 1.85) {
@@ -1719,6 +1992,13 @@ export class Game {
     const carryingBaby = this.carry?.kind === 'baby';
     const carryingItem = this.carry?.kind === 'item';
     const base = { type: 'pram', target: p, distance, enabled: false, action: null, label: '', highlight: p.pram };
+
+    if (p.state === 'wandering') {
+      return { ...base, enabled: false, action: null, label: `${p.name} is on the loose — catch them!` };
+    }
+    if (p.state === 'lost') {
+      return { ...base, enabled: false, action: null, label: `${p.name} wandered out of Gjerdrum` };
+    }
 
     if (carryingBaby) {
       if (p.index === this.carry.pramIndex) {
@@ -1904,7 +2184,11 @@ export class Game {
     for (const p of this.pramStates) {
       if (p.state !== 'crying') p.pram.highlight.group.visible = false;
     }
-    if (interaction.type === 'pram') {
+    if (interaction.type === 'wander') {
+      if (this.wanderingBaby) {
+        this.wanderingBaby.ring.material.color.set(interaction.enabled ? '#7ee0c3' : '#ff9ec7');
+      }
+    } else if (interaction.type === 'pram') {
       const p = interaction.target;
       const ring = p.pram ? p.pram.highlight : p.highlight;
       if (p.state !== 'crying' && ring) {
@@ -1945,6 +2229,9 @@ export class Game {
         break;
       case 'returnBabyToPram':
         this.returnBabyToPram(interaction.target);
+        break;
+      case 'catchWanderingBaby':
+        this.catchWanderingBaby();
         break;
       case 'pickupItem':
         this.pickupItem(interaction.item, interaction.key);
@@ -2806,14 +3093,16 @@ export class Game {
       const p = this.pramStates[i];
       if (!entry || !p) continue;
       const targetReady = playerIsHoldingBaby && this.carry.pramIndex === p.index && this.carry.mood === 'ready';
-      const relevant = p.state === 'crying' || p.state === 'needy' || targetReady;
+      const relevant = p.state === 'crying' || p.state === 'needy' || p.state === 'wandering' || targetReady;
       if (!canShow || !relevant) {
         entry.el.classList.remove('show');
         continue;
       }
 
-      const worldPos = p.pram.group.position.clone();
-      worldPos.y = 2.45;
+      const wanderingHere = p.state === 'wandering' && this.wanderingBaby?.pramIndex === p.index;
+      const worldPos = wanderingHere
+        ? this.wanderingBaby.mesh.position.clone().setY(1.8)
+        : p.pram.group.position.clone().setY(2.45);
       const projected = worldPos.project(this.camera);
       const px = (projected.x * 0.5 + 0.5) * width;
       const py = (-projected.y * 0.5 + 0.5) * height;
@@ -2821,7 +3110,10 @@ export class Game {
 
       let icon = 'zzz';
       let cls = 'ready';
-      if (p.state === 'crying') {
+      if (p.state === 'wandering') {
+        icon = 'warning';
+        cls = 'wandering';
+      } else if (p.state === 'crying') {
         icon = 'cry';
         cls = 'crying';
       } else if (p.state === 'needy' && p.need) {
@@ -2845,7 +3137,7 @@ export class Game {
         entry.lastIcon = icon;
       }
       if (entry.lastClass !== cls) {
-        entry.el.classList.remove('crying', 'needy', 'ready');
+        entry.el.classList.remove('crying', 'needy', 'ready', 'wandering');
         entry.el.classList.add(cls);
         entry.lastClass = cls;
       }
@@ -2861,7 +3153,20 @@ export class Game {
     let needLabel = 'dreaming';
     let bar = p.fuss;
     let cls = '';
-    if (p.state === 'needy' && p.need) {
+    if (p.state === 'wandering') {
+      icon = 'warning';
+      stateLabel = 'ON THE LOOSE';
+      const remain = this.wanderingBaby?.pramIndex === p.index ? Math.ceil(this.wanderingBaby.escapeTimer) : 0;
+      needLabel = `catch them! ${remain}s`;
+      bar = 1;
+      cls = 'wandering';
+    } else if (p.state === 'lost') {
+      icon = 'warning';
+      stateLabel = 'LOST';
+      needLabel = 'wandered off';
+      bar = 0.04;
+      cls = 'lost';
+    } else if (p.state === 'needy' && p.need) {
       icon = p.need;
       stateLabel = 'STIRRING';
       needLabel = `needs ${ITEM_META[p.need].short.toLowerCase()}`;
@@ -2969,6 +3274,7 @@ export class Game {
 
   checkEnd() {
     if (this.peace <= 0) this.endShift();
+    else if (this.pramStates.length && this.pramStates.every((p) => p.state === 'lost')) this.endShift();
   }
 
   endShift() {
@@ -2985,6 +3291,7 @@ export class Game {
     }
     this.audio.setMusicPaused(true);
     this.clearCarryVisual();
+    this.clearWandering();
     this.clearProjectiles();
     this.keys.clear();
     this.touchMove.x = 0;
