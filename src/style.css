@@ -3372,3 +3372,90 @@ button:focus-visible {
     font-size: 6.5px;
   }
 }
+
+/* Persistent warmer status. This lives in the HUD so the tiny stove
+   progress bar can never disappear behind the order cards or toast rail. */
+.warmer-hud {
+  position: absolute;
+  top: 198px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 17;
+  width: min(330px, 86vw);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 11px;
+  border: 2.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--cream);
+  box-shadow: 0 3px 0 rgba(39, 32, 60, 0.75);
+  pointer-events: none;
+}
+.warmer-hud.hidden {
+  display: none !important;
+}
+.warmer-kicker {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 7px;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+.warmer-track {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  background: rgba(39, 32, 60, 0.12);
+}
+.warmer-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--mustard);
+  transition: width 0.12s linear;
+}
+#warmer-status {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.warmer-hud.ready {
+  background: var(--mint);
+  animation: warmer-ready-pulse 0.8s ease-in-out infinite alternate;
+}
+.warmer-hud.ready .warmer-track i {
+  background: var(--red);
+}
+@keyframes warmer-ready-pulse {
+  from { box-shadow: 0 3px 0 rgba(39, 32, 60, 0.75), 0 0 0 0 rgba(232, 74, 95, 0.5); }
+  to { box-shadow: 0 3px 0 rgba(39, 32, 60, 0.75), 0 0 0 6px rgba(232, 74, 95, 0.08); }
+}
+#hud.has-warmer .toasts {
+  top: 218px;
+}
+@media (pointer: coarse) and (orientation: portrait) {
+  .warmer-hud {
+    top: 174px;
+    width: min(330px, 90vw);
+    padding: 5px 9px;
+  }
+  .warmer-kicker {
+    font-size: 6.5px;
+  }
+  #warmer-status {
+    font-size: 7.5px;
+  }
+}
+@media (pointer: coarse) and (orientation: landscape) {
+  .warmer-hud {
+    top: 158px;
+    width: min(300px, 40vw);
+  }
+}

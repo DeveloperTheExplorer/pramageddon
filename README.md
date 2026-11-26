@@ -14,6 +14,7 @@ There are no shifts or finish lines now. Every run is one endless arcade attempt
 - **Crib already full?** Put the crying baby back in their own pram with **E** (or **Q** while beside it), then come back when the crib is free. The game now marks that pram and gives you a clear return prompt, so a full crib can never leave you stuck holding a baby.
 - Throwing is manual: face a pram/crib and watch the ground arrow. It turns **mint** when you are aimed at a valid target, red when you are not. `R` or **THROW** sends whatever is in Inger's hands in that direction. Miss a baby throw and the run ends immediately.
 - **Dash** with `Shift` or the lightning button (or double-tap the joystick) to cross the yard.
+- **Bottle warmer:** a persistent HUD bar shows the warming countdown from anywhere, then flips to **READY · E**. The floating station icon is hidden while the warmer is in use so it never covers the bottle or progress bar.
 
 ## Leaderboard
 

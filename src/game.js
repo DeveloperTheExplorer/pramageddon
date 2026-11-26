@@ -206,7 +206,8 @@ export class Game {
     this.progressCrib.position.set(-3.35, 3.28, -5.9);
     this.scene.add(this.progressCrib);
     this.progressWarmer = createProgressBar('#ffd166');
-    this.progressWarmer.position.set(2.55, 2.5, -6.35);
+    this.progressWarmer.position.set(2.55, 3.25, -6.35);
+    this.progressWarmer.scale.setScalar(1.25);
     this.scene.add(this.progressWarmer);
 
     this.foxAlert = makeIconSprite('warning', { scale: 0.5, bg: '#ff7a6b' });
@@ -268,6 +269,9 @@ export class Game {
       hudScore: $('hud-score'),
       hudCombo: $('hud-combo'),
       heatPill: $('heat-pill'),
+      warmerHud: $('warmer-hud'),
+      warmerFill: $('warmer-fill'),
+      warmerStatus: $('warmer-status'),
       personalBest: $('personal-best'),
       bestValue: $('best-value'),
       resultsBest: $('results-best'),
@@ -773,6 +777,10 @@ export class Game {
     this.dom.peaceNote.textContent = 'Two prams. The street is watching.';
     this.dom.handContent.textContent = 'nothing yet';
     this.dom.handThrow?.classList.add('hidden');
+    if (this.dom.warmerHud) {
+      this.dom.warmerHud.classList.add('hidden');
+      this.dom.hud.classList.remove('has-warmer');
+    }
     this.dom.hud.classList.remove('hidden');
     this.dom.chaosFrame.classList.remove('on');
     this.dom.prompt.classList.add('hidden');
@@ -1365,6 +1373,7 @@ export class Game {
       const progress = clamp(station.timer / station.maxTimer, 0, 1);
       station.group.userData.bottle.visible = true;
       station.group.userData.steamGroup.visible = true;
+      if (station.icon) station.icon.visible = false;
       this.progressWarmer.visible = true;
       this.progressWarmer.userData.fill.scale.x = Math.max(0.001, progress);
       this.progressWarmer.userData.fill.position.x = -0.59 + 0.59 * progress;
@@ -1375,12 +1384,13 @@ export class Game {
         this.progressWarmer.visible = false;
         this.audio.warmReady();
         this.showToast('Warm bottle ready! Grab it with E.', 'good', 'bottle');
-        if (this.world.stations.warmer.icon) {
-          this.world.stations.warmer.icon.material.map = this.iconMaps.bottle;
-          this.world.stations.warmer.icon.material.needsUpdate = true;
+        if (station.icon) {
+          station.icon.material.map = this.iconMaps.bottle;
+          station.icon.material.needsUpdate = true;
         }
       }
     } else if (station.state === 'ready') {
+      if (station.icon) station.icon.visible = false;
       station.group.userData.steamGroup.visible = true;
       station.group.userData.steamGroup.children.forEach((puff, i) => {
         puff.position.y = (this.elapsed * 0.2 + i * 0.14) % 0.55;
@@ -1389,7 +1399,35 @@ export class Game {
     } else {
       station.group.userData.bottle.visible = false;
       station.group.userData.steamGroup.visible = false;
+      if (station.icon) station.icon.visible = true;
       this.progressWarmer.visible = false;
+    }
+    this.updateWarmerHud();
+  }
+
+  updateWarmerHud() {
+    if (!this.dom.warmerHud) return;
+    const station = this.world.stations.warmer;
+    if (!station) return;
+    const active = this.mode === 'playing' || this.mode === 'countdown' || this.mode === 'paused';
+    if (!active || station.state === 'empty') {
+      this.dom.warmerHud.classList.add('hidden');
+      this.dom.hud.classList.remove('has-warmer');
+      return;
+    }
+    this.dom.warmerHud.classList.remove('hidden');
+    this.dom.hud.classList.add('has-warmer');
+    if (station.state === 'warming') {
+      const progress = clamp(station.timer / station.maxTimer, 0, 1);
+      this.dom.warmerHud.classList.remove('ready');
+      this.dom.warmerHud.classList.add('warming');
+      this.dom.warmerFill.style.width = `${Math.max(2, progress * 100)}%`;
+      this.dom.warmerStatus.textContent = `${Math.max(0, station.maxTimer - station.timer).toFixed(1)}s`;
+    } else {
+      this.dom.warmerHud.classList.remove('warming');
+      this.dom.warmerHud.classList.add('ready');
+      this.dom.warmerFill.style.width = '100%';
+      this.dom.warmerStatus.textContent = 'READY · E';
     }
   }
 
@@ -1400,7 +1438,13 @@ export class Game {
     station.timer = 0;
     station.group.userData.bottle.visible = false;
     station.group.userData.steamGroup.visible = false;
+    if (station.icon) station.icon.visible = true;
     this.progressWarmer.visible = false;
+    if (this.dom.warmerHud) {
+      this.dom.warmerHud.classList.add('hidden');
+      this.dom.warmerHud.classList.remove('warming', 'ready');
+      this.dom.hud.classList.remove('has-warmer');
+    }
   }
 
   updateCrib(dt) {
@@ -2037,6 +2081,7 @@ export class Game {
     station.group.userData.steamGroup.visible = true;
     this.audio.bottleIn();
     this.showToast('Bottle warming. You can leave it — the stove does the rest.', 'good', 'bottle');
+    this.updateWarmerHud();
     this.updateHud(true);
   }
 
@@ -2054,6 +2099,8 @@ export class Game {
     this.playerParts.handAnchor.add(mesh);
     this.carry = { kind: 'item', type: 'bottle', warm: true, mesh };
     this.audio.pickup();
+    if (this.world.stations.warmer.icon) this.world.stations.warmer.icon.visible = true;
+    this.updateWarmerHud();
     this.showToast('Warm bottle, straight from the stove.', 'good', 'bottle', 2000);
     this.updateHud(true);
   }
@@ -2922,6 +2969,10 @@ export class Game {
     this.dom.hud.classList.add('hidden');
     this.dom.countdown.classList.add('hidden');
     this.dom.chaosFrame.classList.remove('on');
+    if (this.dom.warmerHud) {
+      this.dom.warmerHud.classList.add('hidden');
+      this.dom.hud.classList.remove('has-warmer');
+    }
     this.audio.setMusicPaused(true);
     this.clearCarryVisual();
     this.clearProjectiles();
