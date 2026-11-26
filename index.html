@@ -9,8 +9,8 @@
     <meta name="apple-mobile-web-app-title" content="Pramageddon" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="format-detection" content="telephone=no" />
-    <meta name="description" content="Pramageddon: Inger’s low-poly Norwegian nap-shift game in Gjerdrum, about keeping outdoor-sleeping babies peaceful." />
-    <title>PRAMAGEDDON — Inger’s Gjerdrum Nap Shift</title>
+    <meta name="description" content="Pramageddon: Inger’s endless Norwegian nap arcade in Gjerdrum. Keep outdoor-sleeping babies peaceful, aim your throws, and chase the high score." />
+    <title>PRAMAGEDDON — Inger’s Gjerdrum Arcade</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 22 16%22><rect width=%2222%22 height=%2216%22 fill=%22%23ba0c2f%22/><rect x=%226%22 width=%224%22 height=%2216%22 fill=%22%23fff%22/><rect y=%226%22 width=%2222%22 height=%224%22 fill=%22%23fff%22/><rect x=%227%22 width=%222%22 height=%2216%22 fill=%22%2300205b%22/><rect y=%227%22 width=%2222%22 height=%222%22 fill=%22%2300205b%22/></svg>" />
   </head>
   <body>
@@ -23,9 +23,9 @@
       <div id="hud" class="hidden" aria-live="polite">
         <div class="topbar">
           <div class="top-left">
-            <div class="night-stamp"><span id="hud-night">SHIFT 1</span></div>
-            <div class="shift-name" id="hud-shift-name">DAGSLUR</div>
-            <div class="timer" id="hud-timer">1:30</div>
+            <div class="night-stamp"><span id="hud-night">ARCADE</span></div>
+            <div class="shift-name" id="hud-shift-name">INGER · GJERDRUM</div>
+            <div class="timer" id="hud-timer">0:00</div>
           </div>
 
           <div class="peace-panel">
@@ -43,11 +43,9 @@
           </div>
 
           <div class="score-panel">
-            <div class="score-label">SHIFT SCORE</div>
+            <div class="score-label">RUN SCORE</div>
             <div class="score-value" id="hud-score">0</div>
-            <div class="star-meter" id="star-meter" aria-label="Star progress">
-              <span>★</span><span>★</span><span>★</span>
-            </div>
+            <div class="heat-pill" id="heat-pill">HEAT ×1.0</div>
             <div class="combo-chip hidden" id="hud-combo">COMBO ×1</div>
           </div>
         </div>
@@ -115,7 +113,7 @@
           <div class="title-block">
             <div class="kicker"><span class="kicker-line"></span> A COZY CHAOS SIMULATION <span class="kicker-line"></span></div>
             <h1 class="game-title" data-text="PRAMAGEDDON">PRAMAGEDDON</h1>
-            <div class="subtitle-tape">NORWEGIAN NAP SHIFT</div>
+            <div class="subtitle-tape">NORWEGIAN NAP ARCADE</div>
             <p class="tagline">The babies are asleep outside in Gjerdrum.<br /> <em>Inger is keeping it that way.</em></p>
           </div>
 
@@ -125,28 +123,28 @@
               <span class="weather">GJERDRUM · 2°C · KOSELIG</span>
             </div>
             <p class="start-blurb">
-              Inger keeps the prams of Gjerdrum peaceful while Norwegian babies nap outdoors — fresh air, low sun,
-              and absolutely no indoor naps. She is the neighbourhood's last line of defence between
-              <strong>peaceful slumber</strong> and a <strong>full-blown wail-pocalypse</strong>.
+              Inger is keeping the prams of Gjerdrum peaceful while the babies nap outdoors. There is no finish line:
+              more prams arrive, the cries get louder, and the street gets needier. Chase a high score, aim your
+              throws, and survive as long as the neighbours can stand it.
             </p>
             <div class="how-row">
-              <div class="how-item"><span class="how-icon pink">🍼</span><span>Read the need.<br /> Fetch the thing.</span></div>
-              <div class="how-item"><span class="how-icon blue">☀️</span><span>Wailing? Scoop,<br /> soothe, return.</span></div>
-              <div class="how-item"><span class="how-icon yellow">🦊</span><span>Survive the<br /> local wildlife.</span></div>
+              <div class="how-item"><span class="how-icon pink">🍼</span><span>Keep two prams<br /> calm. Then more.</span></div>
+              <div class="how-item"><span class="how-icon blue">☀️</span><span>Face a pram.<br /> Aim before you throw.</span></div>
+              <div class="how-item"><span class="how-icon yellow">🔥</span><span>Every minute<br /> gets meaner.</span></div>
             </div>
             <button id="start-btn" class="big-btn primary">
               <span class="big-btn-small">CLOCK IN</span>
-              <span class="big-btn-main">START NAP SHIFT</span>
+              <span class="big-btn-main">START ARCADE RUN</span>
             </button>
             <div class="start-links">
               <button id="help-btn" class="text-btn">HOW TO PLAY</button>
               <span class="dot">·</span>
-              <button id="start-mute-btn" class="text-btn">SOUND: ON</button>
+              <button id="leaderboard-btn" class="text-btn">LEADERBOARD</button>
               <span class="dot">·</span>
-              <span class="text-note">HEADPHONES RECOMMENDED</span>
+              <button id="start-mute-btn" class="text-btn">SOUND: ON</button>
             </div>
             <div class="personal-best" id="personal-best">
-              <span>PERSONAL BEST</span>
+              <span>LOCAL BEST</span>
               <strong id="best-value">0</strong>
             </div>
           </div>
@@ -214,17 +212,17 @@
             <div class="help-block">
               <div class="help-num">02</div>
               <h3>Give the right thing</h3>
-              <p>Walk close and press <b>E</b> to pick up an item, then <b>E</b> at the pram to give it. One pair of hands, one thing at a time. <b>Q</b> drops it, <b>SHIFT</b> dashes, and <b>R</b> throws it at the nearest valid target.</p>
+              <p>Walk close and press <b>E</b> to pick up an item, then <b>E</b> at the pram to give it. One pair of hands, one thing at a time. <b>Q</b> drops it, <b>SHIFT</b> dashes, and <b>R</b> throws it in the direction Inger faces. The ground arrow turns mint when you are aimed at a valid pram.</p>
             </div>
             <div class="help-block">
               <div class="help-num">03</div>
               <h3>Handle the wails</h3>
-              <p>A crying baby won't take a binky. Scoop them up with <b>E</b>, carry them inside, and tuck them into the big crib. Or press <b>R</b> to throw the baby at the crib from a distance. A perfect throw is a shortcut; a missed baby ends the shift.</p>
+              <p>A crying baby won't take a binky. Scoop them up with <b>E</b>, carry them inside, and tuck them into the big crib. Or aim at the crib and press <b>R</b> to throw the baby. A perfect throw is a shortcut; a missed baby ends the run.</p>
             </div>
             <div class="help-block">
               <div class="help-num">04</div>
               <h3>Protect the peace</h3>
-              <p>Crying drains the neighbourhood peace bar. Keep it above zero until sunrise. Foxes are not helpful. Shoo them by getting close and pressing <b>E</b>.</p>
+              <p>Crying drains the neighbourhood peace bar. The run ends at zero. New prams arrive, needs bite faster, and foxes get bold. Keep the loop moving.</p>
             </div>
           </div>
           <div class="help-controls" id="help-controls">
@@ -244,27 +242,50 @@
         <div class="results-card">
           <div class="results-top">
             <div>
-              <div class="eyebrow" id="results-eyebrow">SHIFT COMPLETE</div>
-              <h2 id="results-title">GOLDEN HOUR.</h2>
-              <p id="results-flavor">The street survived the afternoon. The babies did not notice.</p>
+              <div class="eyebrow" id="results-eyebrow">RUN OVER</div>
+              <h2 id="results-title">THE NEIGHBOURS CALLED.</h2>
+              <p id="results-flavor">The street heard everything. Gjerdrum will remember.</p>
             </div>
-            <div class="stars-wrap" id="results-stars"></div>
           </div>
           <div class="results-score">
-            <span>SHIFT SCORE</span>
-            <em id="results-best" class="result-best hidden">NEW PERSONAL BEST</em>
+            <span>RUN SCORE</span>
+            <em id="results-best" class="result-best hidden">NEW LOCAL BEST</em>
             <strong id="results-score">0</strong>
           </div>
           <div class="results-stats">
             <div><span>BABIES SOOTHED</span><strong id="result-soothed">0</strong></div>
+            <div><span>SURVIVAL</span><strong id="result-time">0:00</strong></div>
             <div><span>BEST COMBO</span><strong id="result-combo">×1</strong></div>
-            <div><span>PEACE LEFT</span><strong id="result-peace">100%</strong></div>
             <div><span>RANK</span><strong id="result-rank">PRAM ROOKIE</strong></div>
           </div>
+          <div class="score-submit">
+            <label for="score-name-input">NAME FOR THE BOARD</label>
+            <div class="score-submit-row">
+              <input id="score-name-input" maxlength="12" autocomplete="off" spellcheck="false" value="INGER" />
+              <button id="submit-score-btn" class="big-btn secondary"><span class="big-btn-main">SEND TO GJERDRUM</span></button>
+            </div>
+            <span id="score-submit-status" class="score-submit-status"></span>
+          </div>
           <div class="results-actions">
-            <button id="next-night-btn" class="big-btn primary"><span class="big-btn-main">NEXT SHIFT</span></button>
-            <button id="retry-night-btn" class="big-btn secondary"><span class="big-btn-main">RUN IT AGAIN</span></button>
+            <button id="retry-night-btn" class="big-btn primary"><span class="big-btn-main">PLAY AGAIN</span></button>
+            <button id="results-leaderboard-btn" class="text-btn">LEADERBOARD</button>
             <button id="results-title-btn" class="text-btn">TITLE SCREEN</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-leaderboard" class="screen paper-screen hidden">
+        <div class="paper-card leaderboard-card">
+          <div class="paper-tape"></div>
+          <button id="leaderboard-close" class="close-btn" aria-label="Close leaderboard">×</button>
+          <div class="eyebrow">GJERDRUM HALL OF NAPS</div>
+          <h2>HIGH SCORES</h2>
+          <p class="leaderboard-status" id="leaderboard-status">Loading the global board…</p>
+          <div class="leaderboard-personal" id="leaderboard-personal"></div>
+          <div class="leaderboard-list" id="leaderboard-list"></div>
+          <div class="leaderboard-actions">
+            <button id="leaderboard-play" class="big-btn primary"><span class="big-btn-main">PLAY ARCADE</span></button>
+            <button id="leaderboard-back" class="text-btn">BACK</button>
           </div>
         </div>
       </section>

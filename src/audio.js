@@ -167,7 +167,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     while (this.nextNoteTime < ctx.currentTime + this.lookahead) {
       this.scheduleStep(this.step, this.nextNoteTime);
-      const bpm = 108 + this.intensity * 8;
+      const bpm = 100 + this.intensity * 44;
       const stepDur = 60 / bpm / 4;
       this.nextNoteTime += stepDur;
       this.step = (this.step + 1) % 64;

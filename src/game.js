@@ -16,8 +16,20 @@ import {
   BABY_NAMES,
   PRAM_COLORS,
   NEED_POOL,
+  ARCADE,
 } from './config.js';
 import { getIconDataUrl } from './icons.js';
+import {
+  fetchGlobalScores,
+  formatRunClock,
+  getLocalBest,
+  getLocalScores,
+  getSavedName,
+  renameLocalScore,
+  saveLocalScore,
+  savePlayerName,
+  submitGlobalScore,
+} from './leaderboard.js';
 
 const ICON_BG = {
   zzz: '#fff6df',
@@ -123,6 +135,23 @@ export class Game {
     this.walkPhase = 0;
     this.footstepTimer = 0;
     this.elapsedShift = 0;
+    this.intensity = 1;
+    this.musicIntensity = 0.1;
+    this.activePramCount = ARCADE.startPrams;
+    this.nextPramSlot = ARCADE.startPrams;
+    this.nextPramAt = ARCADE.addPramAt[0];
+    this.moodIndex = 0;
+    this.aimTarget = null;
+    this.aimPulse = 0;
+    this.playerName = getSavedName();
+    this.localEntry = null;
+    this.remoteSubmitted = false;
+    this.leaderboardGlobal = [];
+    this.leaderboardLocal = getLocalScores();
+    this.leaderboardStatus = 'idle';
+    this.leaderboardReturn = 'title';
+    this.leaderboardLoading = false;
+    this.scoreSaved = false;
     this.countdownHide = 0;
     this.countdownStep = 3;
     this.countdownTimer = 0;
@@ -159,11 +188,11 @@ export class Game {
     this.toastTimeout = null;
     this.lastResult = null;
     this.newBest = false;
-    this.bestScore = 0;
+    this.bestScore = getLocalBest();
     try {
-      this.bestScore = Number(window.localStorage.getItem('pramageddon-best') || 0) || 0;
+      this.bestScore = Math.max(this.bestScore, Number(window.localStorage.getItem('pramageddon-best') || 0) || 0);
     } catch (error) {
-      this.bestScore = 0;
+      // Local storage can be unavailable in private mode.
     }
     this.helpReturnMode = 'title';
     this.pendingNightIntro = false;
@@ -206,6 +235,7 @@ export class Game {
     this.cribArrow.visible = false;
     this.scene.add(this.cribArrow);
 
+    this.createAimHelpers();
     this.cacheDom();
     this.bindUI();
     this.bindInput();
@@ -228,6 +258,7 @@ export class Game {
       screenPause: $('screen-pause'),
       screenHelp: $('screen-help'),
       screenResults: $('screen-results'),
+      screenLeaderboard: $('screen-leaderboard'),
       hudNight: $('hud-night'),
       hudShiftName: $('hud-shift-name'),
       hudTimer: $('hud-timer'),
@@ -236,7 +267,7 @@ export class Game {
       peaceNote: $('peace-note'),
       hudScore: $('hud-score'),
       hudCombo: $('hud-combo'),
-      starMeter: $('star-meter'),
+      heatPill: $('heat-pill'),
       personalBest: $('personal-best'),
       bestValue: $('best-value'),
       resultsBest: $('results-best'),
@@ -274,12 +305,23 @@ export class Game {
       resultsScore: $('results-score'),
       resultSoothed: $('result-soothed'),
       resultCombo: $('result-combo'),
-      resultPeace: $('result-peace'),
+      resultTime: $('result-time'),
       resultRank: $('result-rank'),
       resultsActions: document.querySelector('.results-actions'),
-      nextNightBtn: $('next-night-btn'),
       retryNightBtn: $('retry-night-btn'),
+      resultsLeaderboardBtn: $('results-leaderboard-btn'),
       resultsTitleBtn: $('results-title-btn'),
+      scoreNameInput: $('score-name-input'),
+      submitScoreBtn: $('submit-score-btn'),
+      scoreSubmitStatus: $('score-submit-status'),
+      leaderboardBtn: $('leaderboard-btn'),
+      leaderboardClose: $('leaderboard-close'),
+      leaderboardBack: $('leaderboard-back'),
+      leaderboardPlay: $('leaderboard-play'),
+      leaderboardList: $('leaderboard-list'),
+      leaderboardStatus: $('leaderboard-status'),
+      leaderboardBest: $('leaderboard-best'),
+      leaderboardPersonal: $('leaderboard-personal'),
       startMuteBtn: $('start-mute-btn'),
       muteBtn: $('mute-btn'),
       pauseBtn: $('pause-btn'),
@@ -299,7 +341,6 @@ export class Game {
 
   bindUI() {
     this.dom.startBtn.addEventListener('click', () => this.startClicked());
-    this.dom.nightBtn.addEventListener('click', () => this.beginShift());
     this.dom.pauseBtn.addEventListener('click', () => this.togglePause());
     this.dom.resumeBtn.addEventListener('click', () => this.resumeGame());
     this.dom.quitBtn.addEventListener('click', () => this.returnToTitle());
@@ -310,9 +351,23 @@ export class Game {
     this.dom.muteBtn.addEventListener('click', () => this.toggleMute());
     this.dom.startMute.addEventListener('click', () => this.toggleMute());
     this.dom.dashBtn?.addEventListener('click', () => this.startDash());
-    this.dom.nextNightBtn.addEventListener('click', () => this.nextNight());
     this.dom.retryNightBtn.addEventListener('click', () => this.retryNight());
+    this.dom.resultsLeaderboardBtn?.addEventListener('click', () => this.openLeaderboard('results'));
     this.dom.resultsTitleBtn.addEventListener('click', () => this.returnToTitle());
+    this.dom.leaderboardBtn?.addEventListener('click', () => this.openLeaderboard('title'));
+    this.dom.leaderboardClose?.addEventListener('click', () => this.closeLeaderboard());
+    this.dom.leaderboardBack?.addEventListener('click', () => this.closeLeaderboard());
+    this.dom.leaderboardPlay?.addEventListener('click', () => this.startArcadeRun());
+    this.dom.submitScoreBtn?.addEventListener('click', () => this.submitScore());
+    this.dom.scoreNameInput?.addEventListener('input', () => {
+      this.playerName = savePlayerName(this.dom.scoreNameInput.value);
+    });
+    this.dom.scoreNameInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        this.submitScore();
+      }
+    });
     window.addEventListener('resize', () => this.resize());
     this.bindTouchControls();
     this.bindFullscreen();
@@ -320,6 +375,7 @@ export class Game {
 
   bindInput() {
     window.addEventListener('keydown', (event) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       const code = event.code;
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(code)) {
         event.preventDefault();
@@ -332,25 +388,22 @@ export class Game {
         this.toggleMute();
       } else if (code === 'Enter') {
         if (this.mode === 'title') this.startClicked();
-        else if (this.mode === 'nightIntro') this.beginShift();
         else if (this.mode === 'paused') this.resumeGame();
         else if (this.mode === 'help') this.closeHelp();
-        else if (this.mode === 'results') {
-          if (this.lastResult?.survived) this.nextNight();
-          else this.retryNight();
-        }
+        else if (this.mode === 'results') this.retryNight();
+        else if (this.mode === 'leaderboard') this.closeLeaderboard();
       } else if (code === 'Escape' || code === 'KeyP') {
         if (this.mode === 'playing' || this.mode === 'countdown') this.togglePause();
         else if (this.mode === 'paused') this.resumeGame();
         else if (this.mode === 'help') this.closeHelp();
+        else if (this.mode === 'leaderboard') this.closeLeaderboard();
       } else if (code === 'KeyH') {
         if (this.mode === 'help') this.closeHelp();
         else if (this.mode === 'playing' || this.mode === 'countdown' || this.mode === 'paused') this.openHelp(this.mode === 'paused' ? 'paused' : this.mode);
-        else if (this.mode === 'title' || this.mode === 'nightIntro') this.openHelp(this.mode);
+        else if (this.mode === 'title') this.openHelp(this.mode);
       } else if (code === 'KeyE' || code === 'Space') {
         if (this.mode === 'playing') this.interact();
         else if (this.mode === 'title') this.startClicked();
-        else if (this.mode === 'nightIntro') this.beginShift();
       } else if (code === 'KeyQ') {
         if (this.mode === 'playing') this.dropCarried();
       } else if (code === 'ShiftLeft' || code === 'ShiftRight') {
@@ -484,7 +537,7 @@ export class Game {
   }
 
   showScreens() {
-    for (const key of ['screenStart', 'screenNight', 'screenPause', 'screenHelp', 'screenResults']) {
+    for (const key of ['screenStart', 'screenNight', 'screenPause', 'screenHelp', 'screenResults', 'screenLeaderboard']) {
       this.dom[key].classList.add('hidden');
     }
   }
@@ -500,14 +553,13 @@ export class Game {
     this.audio.setMusicPaused(false);
     this.audio.setIntensity(0.18);
     this.world.setShiftMood(0);
-    this.nightIndex = 0;
-    this.night = NIGHTS[0];
+    this.moodIndex = 0;
     this.pramStates = [];
     this.cardEls = [];
     this.offscreenEls = [];
     this.dom.orderRail.innerHTML = '';
     if (this.dom.offscreenMarkers) this.dom.offscreenMarkers.innerHTML = '';
-    this.setPreviewPrams(3);
+    this.setPreviewPrams(ARCADE.startPrams);
     for (const pram of this.world.prams) {
       pram.group.userData.shakeGroup.position.set(0, 0, 0);
       pram.group.userData.shakeGroup.rotation.set(0, 0, 0);
@@ -540,7 +592,12 @@ export class Game {
     this.touchMove.x = 0;
     this.touchMove.y = 0;
     this.tipsShown.clear();
+    this.bestScore = getLocalBest();
+    this.playerName = getSavedName();
+    this.leaderboardLocal = getLocalScores();
     if (this.dom.bestValue) this.dom.bestValue.textContent = String(this.bestScore);
+    if (this.dom.scoreNameInput) this.dom.scoreNameInput.value = this.playerName;
+    this.hideAimHelper();
   }
 
   setPreviewPrams(count) {
@@ -562,42 +619,13 @@ export class Game {
     this.audio.ui();
     this.audio.startMusic();
     this.dom.screenStart.classList.add('hidden');
-    this.nightIndex = 0;
-    this.showNightBriefing();
+    this.startArcadeRun();
   }
 
-  showNightBriefing() {
-    this.mode = 'nightIntro';
-    this.night = NIGHTS[this.nightIndex];
-    this.showScreens();
-    this.dom.screenNight.classList.remove('hidden');
-    this.dom.hud.classList.add('hidden');
-    this.dom.screenNight.classList.remove('hidden');
-    this.world.setShiftMood(this.nightIndex);
-    this.dom.nightNumber.textContent = `SHIFT ${this.night.number}`;
-    if (this.dom.nightEyebrow) this.dom.nightEyebrow.textContent = `INGER’S SHIFT · GJERDRUM · ${this.night.clock}`;
-    this.dom.nightTitle.textContent = this.night.name;
-    this.dom.nightSubtitle.textContent = this.night.subtitle;
-    this.dom.nightDuration.textContent = formatTime(this.night.duration);
-    this.dom.nightPrams.textContent = String(this.night.pramCount);
-    this.dom.nightForecast.textContent = FORECASTS[this.nightIndex] || 'KOSELIG';
-    this.dom.nightTip.textContent = this.night.tip;
-    if (this.dom.nightControls) {
-      this.dom.nightControls.innerHTML = window.matchMedia('(pointer: coarse)').matches
-        ? '<span><b>PAD</b> move</span><span><b>E</b> act</span><span><b>Q</b> drop</span><span><b>THROW</b> yeet</span><span><b>ϟ</b> dash</span>'
-        : '<span><b>WASD</b> move</span><span><b>E</b> grab</span><span><b>Q</b> drop</span><span><b>SHIFT</b> dash</span><span><b>R</b> throw</span>';
-    }
-    this.setPreviewPrams(this.night.pramCount);
-    this.player.position.set(PLAYER_START.x, 0, PLAYER_START.z);
-    this.player.rotation.y = 0;
-    this.audio.setMusicPaused(false);
-    this.audio.setIntensity(0.18);
-  }
-
-  beginShift() {
-    if (this.mode !== 'nightIntro') return;
+  startArcadeRun() {
     this.audio.ui();
-    this.dom.screenNight.classList.add('hidden');
+    this.showScreens();
+    this.dom.screenStart.classList.add('hidden');
     this.dom.hud.classList.remove('hidden');
     this.resetShift();
     this.mode = 'countdown';
@@ -610,6 +638,7 @@ export class Game {
     this.dom.prompt.classList.add('hidden');
     this.dom.fade.classList.remove('on');
     this.audio.setMusicPaused(false);
+    this.audio.startMusic();
   }
 
   showCountdown(text, sub = '') {
@@ -620,9 +649,34 @@ export class Game {
     this.dom.countdown.classList.add('pop');
   }
 
+  findPramState(index) {
+    return this.pramStates.find((p) => p.index === index) || null;
+  }
+
+  createPramState(index, calmTimer) {
+    const pram = this.world.prams[index];
+    const state = {
+      index,
+      pram,
+      name: BABY_NAMES[index],
+      state: 'calm',
+      need: null,
+      fuss: 0.05 + Math.random() * 0.1,
+      calmTimer,
+      cryTimer: 0,
+      shake: 0,
+      carryMood: null,
+      iconKey: 'zzz',
+      needFlash: 0,
+    };
+    this.pramStates.push(state);
+    this.applyPramIcon(state);
+    return state;
+  }
+
   resetShift() {
-    this.night = NIGHTS[this.nightIndex];
-    this.timeLeft = this.night.duration;
+    this.night = NIGHTS[0];
+    this.timeLeft = 0;
     this.score = 0;
     this.combo = 1;
     this.comboTimer = 0;
@@ -632,6 +686,8 @@ export class Game {
     this.deliveries = 0;
     this.tucks = 0;
     this.elapsedShift = 0;
+    this.intensity = 1;
+    this.musicIntensity = 0.1;
     this.chaos = 0;
     this.trauma = 0;
     this.countdownHide = 0;
@@ -642,13 +698,20 @@ export class Game {
     this.failureReason = null;
     this.missedBabyName = '';
     this.missedTargetLabel = '';
+    this.localEntry = null;
+    this.remoteSubmitted = false;
+    this.scoreSaved = false;
+    this.nextPramSlot = ARCADE.startPrams;
+    this.nextPramAt = ARCADE.addPramAt[0] ?? null;
+    this.activePramCount = ARCADE.startPrams;
+    this.moodIndex = 0;
     this.clearProjectiles();
-    this.foxTimer = this.night.foxEvery ? this.night.foxEvery * 0.7 : 999;
+    this.foxTimer = ARCADE.firstFoxAt;
     this.birdTimer = 7 + Math.random() * 8;
     this.fox = null;
     this.world.fox.visible = false;
     this.foxAlert.visible = false;
-    this.needSequence = this.night.number === 1 ? ['pacifier', 'bottle', 'blanket', 'teddy'] : [];
+    this.needSequence = ['pacifier', 'blanket', 'bottle', 'teddy'];
     this.player.position.set(PLAYER_START.x, 0, PLAYER_START.z);
     this.player.rotation.y = 0;
     this.cameraFocus.set(PLAYER_START.x, 0.2, 0.9);
@@ -668,60 +731,95 @@ export class Game {
     this.cribArrow.visible = false;
 
     for (const pram of this.world.prams) {
-      const active = pram.index < this.night.pramCount;
-      pram.group.visible = active;
+      pram.group.visible = false;
+      pram.group.scale.setScalar(1);
       pram.highlight.group.visible = false;
       pram.arrow.visible = false;
-      if (!active) continue;
+      pram.icon.visible = false;
       pram.group.position.set(pram.basePosition.x, 0, pram.basePosition.z);
       pram.group.rotation.y = pram.baseRotation;
       pram.group.userData.shakeGroup.position.set(0, 0, 0);
       pram.group.userData.shakeGroup.rotation.set(0, 0, 0);
       pram.group.userData.babyGroup.visible = true;
-      pram.icon.visible = true;
       pram.nameTag.visible = true;
     }
 
     this.pramStates = [];
-    for (let i = 0; i < this.night.pramCount; i += 1) {
-      const pram = this.world.prams[i];
-      const state = {
-        index: i,
-        pram,
-        name: BABY_NAMES[i],
-        state: 'calm',
-        need: null,
-        fuss: 0.06 + Math.random() * 0.12,
-        calmTimer: 6.3 + i * 2.4 + Math.random() * 1.0,
-        cryTimer: 0,
-        shake: 0,
-        carryMood: null,
-        iconKey: 'zzz',
-        needFlash: 0,
-      };
-      this.pramStates.push(state);
-      this.applyPramIcon(state);
+    for (let slot = 0; slot < ARCADE.startPrams; slot += 1) {
+      const index = ARCADE.pramOrder[slot];
+      const pram = this.world.prams[index];
+      pram.group.visible = true;
+      pram.icon.visible = true;
+      this.createPramState(index, 5.4 + slot * 2.4 + Math.random() * 1.2);
     }
+
     for (const station of Object.values(this.world.stations)) {
       if (station.icon) station.icon.visible = true;
     }
     this.buildOrderCards();
-    this.dom.hudNight.textContent = `SHIFT ${this.night.number}`;
-    this.dom.hudShiftName.textContent = `INGER · ${this.night.name.toUpperCase()}`;
-    this.dom.hudTimer.textContent = formatTime(this.timeLeft);
+    this.dom.hudNight.textContent = 'ARCADE';
+    this.dom.hudShiftName.textContent = 'INGER · GJERDRUM';
+    this.dom.hudTimer.textContent = '0:00';
+    this.dom.hudTimer.classList.remove('warn');
     this.dom.hudScore.textContent = '0';
     this.dom.hudCombo.classList.add('hidden');
+    if (this.dom.heatPill) {
+      this.dom.heatPill.textContent = 'HEAT ×1.0';
+      this.dom.heatPill.className = 'heat-pill';
+    }
     this.dom.peaceFill.style.width = '100%';
     this.dom.peaceFill.className = 'peace-fill';
     this.dom.peaceValue.textContent = '100%';
-    this.dom.peaceNote.textContent = 'All is quiet on the cul-de-sac.';
+    this.dom.peaceNote.textContent = 'Two prams. The street is watching.';
     this.dom.handContent.textContent = 'nothing yet';
+    this.dom.handThrow?.classList.add('hidden');
     this.dom.hud.classList.remove('hidden');
     this.dom.chaosFrame.classList.remove('on');
     this.dom.prompt.classList.add('hidden');
     this.dom.countdown.classList.add('hidden');
-    this.audio.setIntensity(0.2);
-    this.world.setShiftMood(this.nightIndex);
+    if (this.dom.scoreNameInput) this.dom.scoreNameInput.value = this.playerName;
+    if (this.dom.scoreSubmitStatus) this.dom.scoreSubmitStatus.textContent = '';
+    this.audio.setIntensity(0.1);
+    this.world.setShiftMood(0);
+    this.hideAimHelper();
+    this.updateHud(true);
+  }
+
+  hideAimHelper() {
+    if (this.aimArrow) this.aimArrow.visible = false;
+    if (this.aimRing) this.aimRing.visible = false;
+    this.aimTarget = null;
+  }
+
+  addNextPram() {
+    if (this.pramStates.length >= ARCADE.maxPrams) return;
+    const slot = this.nextPramSlot;
+    const index = ARCADE.pramOrder[slot];
+    if (index === undefined) return;
+    const pram = this.world.prams[index];
+    pram.group.visible = true;
+    pram.group.scale.setScalar(0.25);
+    pram.group.position.set(pram.basePosition.x, 0, pram.basePosition.z);
+    pram.group.rotation.y = pram.baseRotation;
+    pram.highlight.group.visible = false;
+    pram.arrow.visible = false;
+    pram.icon.visible = true;
+    pram.nameTag.visible = true;
+    pram.group.userData.shakeGroup.position.set(0, 0, 0);
+    pram.group.userData.shakeGroup.rotation.set(0, 0, 0);
+    pram.group.userData.babyGroup.visible = true;
+    const state = this.createPramState(index, 2.1 + Math.random() * 1.8);
+    state.fuss = 0.1;
+    this.pramStates.sort((a, b) => a.index - b.index);
+    this.activePramCount = this.pramStates.length;
+    this.nextPramSlot += 1;
+    this.nextPramAt = ARCADE.addPramAt[this.activePramCount - ARCADE.startPrams] ?? null;
+    this.buildOrderCards();
+    this.spawnConfetti(pram.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 20);
+    this.flashScreen('#ffe8b8', 0.22);
+    this.addShake(0.08);
+    this.audio.coo(index);
+    this.showToast(`A new pram arrives! ${state.name} is now in the yard.`, 'urgent', 'warning', 3000);
     this.updateHud(true);
   }
 
@@ -827,7 +925,7 @@ export class Game {
         this.tipsShown.add('welcome');
         window.setTimeout(() => {
           if (this.mode === 'playing') {
-            this.showToast('Nap shift started. Read the bubbles above the prams.', 'good', 'zzz');
+            this.showToast('Arcade run started. Read the bubbles — and keep the peace.', 'good', 'zzz');
           }
         }, 500);
       }
@@ -835,8 +933,8 @@ export class Game {
   }
 
   updatePlaying(dt) {
-    this.timeLeft = Math.max(0, this.timeLeft - dt);
     this.elapsedShift += dt;
+    this.updateArcade(dt);
     if (this.countdownHide > 0) {
       this.countdownHide -= dt;
       if (this.countdownHide <= 0) this.dom.countdown.classList.add('hidden');
@@ -852,6 +950,7 @@ export class Game {
     }
 
     this.updatePlayer(dt);
+    this.updateAimHelper();
     this.updateProjectiles(dt);
     this.updatePrams(dt);
     this.updateWarmer(dt);
@@ -866,21 +965,36 @@ export class Game {
       if (p.state === 'needy') needyCount += 1;
     }
     if (this.carry?.kind === 'baby' && this.carry.mood === 'crying') cryingCount += 0.5;
-    const drain = this.night.cryDrain * Math.max(0, cryingCount);
-    const minorDrain = needyCount * 0.09;
+    const drain = (ARCADE.baseCryDrain + Math.min(2.2, this.elapsedShift * 0.0035)) * Math.max(0, cryingCount);
+    const minorDrain = needyCount * (0.07 + Math.min(0.08, this.elapsedShift * 0.0002));
     this.peace -= (drain + minorDrain) * dt;
-    if (cryingCount === 0 && needyCount === 0) this.peace += 0.78 * dt;
-    else if (cryingCount === 0) this.peace += 0.22 * dt;
+    if (cryingCount === 0 && needyCount === 0) this.peace += 0.63 * dt;
+    else if (cryingCount === 0) this.peace += 0.18 * dt;
     this.peace = clamp(this.peace, 0, 100);
 
-    this.chaos = clamp((cryingCount / Math.max(1, this.night.pramCount)) * 0.75 + needyCount * 0.06 + (1 - this.peace / 100) * 0.35, 0, 1);
-    this.audio.setIntensity(0.2 + this.chaos * 0.68);
-    this.dom.chaosFrame.classList.toggle('on', cryingCount >= 2 || this.peace < 22);
+    const activeCount = Math.max(1, this.pramStates.length);
+    const danger = 1 - this.peace / 100;
+    this.chaos = clamp(
+      (cryingCount / activeCount) * 0.55 +
+        needyCount * 0.065 +
+        danger * 0.55 +
+        (this.intensity - 1) * 0.16,
+      0,
+      1
+    );
+    const musicTarget = clamp(
+      0.08 + danger * 0.62 + (this.intensity - 1) * 0.18 + Math.min(0.18, cryingCount * 0.05),
+      0,
+      1
+    );
+    this.musicIntensity = damp(this.musicIntensity, musicTarget, 1.6, dt);
+    this.audio.setIntensity(this.musicIntensity);
+    this.dom.chaosFrame.classList.toggle('on', cryingCount >= 2 || this.peace < 28 || this.intensity > 2.05);
     if (this.dom.chaosFrame.classList.contains('on')) {
       this.chaosPulse = (this.chaosPulse || 0) + dt;
     }
 
-    if (this.foxTimer > 0 && this.night.foxEvery) {
+    if (this.foxTimer > 0) {
       this.foxTimer -= dt;
       if (this.foxTimer <= 0 && !this.fox) this.spawnFox();
     }
@@ -895,6 +1009,30 @@ export class Game {
 
     this.updateHud(false);
     this.checkEnd();
+  }
+
+  updateArcade(dt) {
+    let guard = 0;
+    while (
+      this.nextPramAt !== null &&
+      this.elapsedShift >= this.nextPramAt &&
+      this.pramStates.length < ARCADE.maxPrams &&
+      guard < ARCADE.maxPrams
+    ) {
+      this.addNextPram();
+      guard += 1;
+    }
+    const timeHeat = Math.min(1.5, this.elapsedShift / 240);
+    this.intensity = 1 + timeHeat + Math.max(0, this.pramStates.length - ARCADE.startPrams) * 0.07;
+    const targetMood = this.elapsedShift > 160 ? 2 : this.elapsedShift > 75 ? 1 : 0;
+    if (targetMood !== this.moodIndex) {
+      this.moodIndex = targetMood;
+      this.world.setShiftMood(targetMood);
+    }
+  }
+
+  calmTime(base = 12, variance = 5) {
+    return clamp((base + Math.random() * variance) / Math.max(1, this.intensity * 0.9), 3.2, 16);
   }
 
   startDash() {
@@ -1068,7 +1206,7 @@ export class Game {
         p.calmTimer -= dt;
         if (p.calmTimer <= 0) this.becomeNeedy(p);
       } else if (p.state === 'needy') {
-        p.fuss = clamp(p.fuss + this.night.needBite * dt, 0, 1);
+        p.fuss = clamp(p.fuss + ARCADE.baseNeedBite * this.intensity * dt, 0, 1);
         p.needFlash = Math.max(0, p.needFlash - dt);
         if (p.fuss >= 1) this.becomeCrying(p);
       } else if (p.state === 'crying') {
@@ -1096,7 +1234,7 @@ export class Game {
   becomeNeedy(p) {
     if (p.state !== 'calm') return;
     p.state = 'needy';
-    p.fuss = 0.46;
+    p.fuss = clamp(0.42 + (this.intensity - 1) * 0.06, 0.42, 0.62);
     p.need = this.chooseNeed();
     p.needFlash = 1.4;
     p.calmTimer = 0;
@@ -1176,6 +1314,10 @@ export class Game {
   updatePramVisuals(dt) {
     for (const p of this.pramStates) {
       if (!p.pram.group.visible) continue;
+      if (p.pram.group.scale.x < 0.999) {
+        const nextScale = damp(p.pram.group.scale.x, 1, 7, dt);
+        p.pram.group.scale.setScalar(nextScale);
+      }
       const userData = p.pram.group.userData;
       const isCrying = p.state === 'crying';
       const shakeAmount = isCrying ? 0.05 : p.shake > 0 ? p.shake * 0.04 : 0;
@@ -1273,7 +1415,7 @@ export class Game {
       if (crib.timer >= crib.maxTimer) {
         crib.state = 'ready';
         this.progressCrib.visible = false;
-        const p = this.pramStates[this.cribOccupant];
+        const p = this.findPramState(this.cribOccupant);
         if (p) {
           p.state = 'ready';
           this.audio.warmReady();
@@ -1352,7 +1494,7 @@ export class Game {
           f.visible = false;
           this.fox = null;
           this.foxAlert.visible = false;
-          this.foxTimer = this.night.foxEvery * (0.85 + Math.random() * 0.5);
+          this.foxTimer = Math.max(12, 38 - this.elapsedShift * 0.035) * (0.85 + Math.random() * 0.5);
         }
       }
       if (this.fox) {
@@ -1642,7 +1784,7 @@ export class Game {
       }
       if (station.state === 'ready') {
         if (!carryingItem) {
-          return { ...base, enabled: true, action: 'pickupCribBaby', label: `Pick up sleepy ${this.pramStates[this.cribOccupant]?.name || 'baby'}` };
+          return { ...base, enabled: true, action: 'pickupCribBaby', label: `Pick up sleepy ${this.findPramState(this.cribOccupant)?.name || 'baby'}` };
         }
         return { ...base, enabled: false, action: null, label: 'Hands full! Put that down first' };
       }
@@ -1820,7 +1962,7 @@ export class Game {
     p.state = 'calm';
     p.fuss = 0;
     p.need = null;
-    p.calmTimer = 13 + Math.random() * 5;
+    p.calmTimer = this.calmTime(12, 5);
     p.needFlash = 0;
     this.applyPramIcon(p);
     this.audio.deliver();
@@ -1899,7 +2041,7 @@ export class Game {
     if (this.carry?.kind !== 'baby' || this.carry.mood !== 'crying') return;
     const crib = this.world.stations.crib;
     if (crib.state !== 'empty') return;
-    const p = this.pramStates[this.carry.pramIndex];
+    const p = this.findPramState(this.carry.pramIndex);
     this.removeCarryMesh();
     this.carry = null;
     this.completeCribPlacement(p, false);
@@ -1931,7 +2073,7 @@ export class Game {
   pickupCribBaby() {
     const crib = this.world.stations.crib;
     if (crib.state !== 'ready' || this.carry) return;
-    const p = this.pramStates[this.cribOccupant];
+    const p = this.findPramState(this.cribOccupant);
     if (!p) return;
     crib.state = 'empty';
     crib.group.userData.baby.visible = false;
@@ -1967,7 +2109,7 @@ export class Game {
     p.fuss = 0;
     p.need = null;
     p.carryMood = null;
-    p.calmTimer = 14 + Math.random() * 5;
+    p.calmTimer = this.calmTime(14, 5);
     p.pram.group.userData.babyGroup.visible = true;
     p.pram.arrow.visible = false;
     p.pram.highlight.group.visible = false;
@@ -2009,54 +2151,133 @@ export class Game {
 
   getThrowTarget() {
     if (!this.carry) return null;
-    const range = 18.0;
+    const isBaby = this.carry.kind === 'baby';
+    const range = isBaby ? ARCADE.babyThrowRange : ARCADE.itemThrowRange;
+    const forwardX = Math.sin(this.player.rotation.y);
+    const forwardZ = Math.cos(this.player.rotation.y);
+    const aimWidth = isBaby ? ARCADE.babyAimWidth : ARCADE.itemAimWidth;
+    let best = null;
+    let bestScore = Infinity;
+
+    const consider = (x, z, target) => {
+      const dx = x - this.player.position.x;
+      const dz = z - this.player.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < 0.15 || distance > range) return;
+      const along = dx * forwardX + dz * forwardZ;
+      if (along <= 0) return;
+      const lateral = Math.abs(dx * forwardZ - dz * forwardX);
+      if (lateral > aimWidth) return;
+      const score = lateral * 3.4 + distance * 0.045;
+      if (score < bestScore) {
+        bestScore = score;
+        best = target;
+      }
+    };
+
     if (this.carry.kind === 'item') {
-      let best = null;
-      let bestDistance = Infinity;
       for (const p of this.pramStates) {
         if (p.state !== 'needy' || p.need !== this.carry.type) continue;
         if (p.need === 'bottle' && !this.carry.warm) continue;
-        const d = this.player.position.distanceTo(p.pram.group.position);
-        if (d <= range && d < bestDistance) {
-          best = p;
-          bestDistance = d;
-        }
+        consider(p.pram.group.position.x, p.pram.group.position.z, {
+          kind: 'pram',
+          pram: p,
+          point: p.pram.group.position.clone().add(new THREE.Vector3(0, 1.35, 0.1)),
+          label: p.name,
+        });
       }
-      if (!best) return null;
-      return {
-        kind: 'pram',
-        pram: best,
-        point: best.pram.group.position.clone().add(new THREE.Vector3(0, 1.35, 0.1)),
-        label: best.name,
-      };
+      return best;
     }
-    if (this.carry.kind === 'baby') {
-      if (this.carry.mood === 'crying') {
-        const crib = this.world.stations.crib;
-        if (crib.state === 'empty' && this.player.position.distanceTo(crib.position) <= range) {
-          return {
-            kind: 'crib',
-            station: crib,
-            pram: this.pramStates[this.carry.pramIndex],
-            point: crib.position.clone().add(new THREE.Vector3(0, 1.25, 0.1)),
-            label: 'the crib',
-          };
-        }
-        return null;
+
+    if (this.carry.mood === 'crying') {
+      const crib = this.world.stations.crib;
+      if (crib.state === 'empty') {
+        consider(crib.position.x, crib.position.z, {
+          kind: 'crib',
+          station: crib,
+          pram: this.findPramState(this.carry.pramIndex),
+          point: crib.position.clone().add(new THREE.Vector3(0, 1.25, 0.1)),
+          label: 'the crib',
+        });
       }
-      if (this.carry.mood === 'ready') {
-        const p = this.pramStates[this.carry.pramIndex];
-        if (p && this.player.position.distanceTo(p.pram.group.position) <= range) {
-          return {
-            kind: 'pram',
-            pram: p,
-            point: p.pram.group.position.clone().add(new THREE.Vector3(0, 1.35, 0.1)),
-            label: p.name,
-          };
-        }
+      return best;
+    }
+
+    if (this.carry.mood === 'ready') {
+      const p = this.findPramState(this.carry.pramIndex);
+      if (p && p.state === 'carried') {
+        consider(p.pram.group.position.x, p.pram.group.position.z, {
+          kind: 'pram',
+          pram: p,
+          point: p.pram.group.position.clone().add(new THREE.Vector3(0, 1.35, 0.1)),
+          label: p.name,
+        });
       }
     }
-    return null;
+    return best;
+  }
+
+  createAimHelpers() {
+    this.aimMaterial = new THREE.MeshBasicMaterial({
+      color: '#7ee0c3',
+      transparent: true,
+      opacity: 0.86,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const arrow = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1.35), this.aimMaterial);
+    shaft.rotation.x = -Math.PI / 2;
+    shaft.position.set(0, 0.045, 0.78);
+    shaft.renderOrder = 36;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.27, 0.52, 3), this.aimMaterial);
+    head.rotation.x = Math.PI / 2;
+    head.position.set(0, 0.045, 1.55);
+    head.renderOrder = 36;
+    arrow.add(shaft, head);
+    arrow.visible = false;
+    this.player.add(arrow);
+    this.aimArrow = arrow;
+
+    this.aimRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.56, 0.73, 28),
+      new THREE.MeshBasicMaterial({
+        color: '#7ee0c3',
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    this.aimRing.rotation.x = -Math.PI / 2;
+    this.aimRing.position.y = 0.05;
+    this.aimRing.visible = false;
+    this.aimRing.renderOrder = 35;
+    this.scene.add(this.aimRing);
+  }
+
+  updateAimHelper() {
+    const active = this.mode === 'playing' && this.carry;
+    this.aimTarget = active ? this.getThrowTarget() : null;
+    if (!this.aimArrow || !this.aimRing) return;
+    this.aimArrow.visible = Boolean(active);
+    if (!active) {
+      this.aimRing.visible = false;
+      return;
+    }
+    const valid = Boolean(this.aimTarget);
+    const color = valid ? '#7ee0c3' : '#ff5e6c';
+    this.aimMaterial.color.set(color);
+    this.aimRing.material.color.set(color);
+    if (valid) {
+      this.aimPulse += 0.05;
+      this.aimRing.position.set(this.aimTarget.point.x, 0.06, this.aimTarget.point.z);
+      this.aimRing.visible = true;
+      this.aimRing.material.opacity = 0.58 + Math.sin(this.elapsed * 6) * 0.2;
+      this.aimRing.scale.setScalar(1 + Math.sin(this.elapsed * 4) * 0.06);
+    } else {
+      this.aimRing.visible = false;
+    }
   }
 
   throwCarried() {
@@ -2086,7 +2307,7 @@ export class Game {
     } else {
       const facingX = Math.sin(this.player.rotation.y);
       const facingZ = Math.cos(this.player.rotation.y);
-      end = new THREE.Vector3(this.player.position.x + facingX * 4.2, 0.35, this.player.position.z + facingZ * 4.2);
+      end = new THREE.Vector3(this.player.position.x + facingX * 8.6, 0.35, this.player.position.z + facingZ * 8.6);
     }
 
     const distance = start.distanceTo(end);
@@ -2383,17 +2604,18 @@ export class Game {
     if (!force && now - this.lastHud < 0.09) return;
     this.lastHud = now;
 
-    this.dom.hudTimer.textContent = formatTime(this.timeLeft);
-    this.dom.hudTimer.classList.toggle('warn', this.timeLeft <= 10 && this.mode === 'playing');
+    this.dom.hudTimer.textContent = formatRunClock(this.elapsedShift);
+    this.dom.hudTimer.classList.remove('warn');
     this.dom.peaceFill.style.width = `${Math.max(0, this.peace)}%`;
     this.dom.peaceValue.textContent = `${Math.round(this.peace)}%`;
     this.dom.peaceFill.className = `peace-fill${this.peace < 30 ? ' danger' : this.peace < 62 ? ' warn' : ''}`;
     this.dom.peaceValue.style.color = this.peace < 30 ? '#c83248' : this.peace < 62 ? '#b27510' : '#2f9e82';
     this.dom.hudScore.textContent = String(this.score);
-    const earnedStars = this.starCount();
-    [...this.dom.starMeter.children].forEach((star, i) => {
-      star.classList.toggle('earned', i < earnedStars);
-    });
+    if (this.dom.heatPill) {
+      this.dom.heatPill.textContent = `HEAT ×${this.intensity.toFixed(1)}`;
+      this.dom.heatPill.classList.toggle('hot', this.intensity >= 1.7);
+      this.dom.heatPill.classList.toggle('blazing', this.intensity >= 2.25);
+    }
     if (this.combo > 1) {
       this.dom.hudCombo.classList.remove('hidden');
       this.dom.hudCombo.textContent = `COMBO ×${Math.min(5, this.combo)}`;
@@ -2401,7 +2623,7 @@ export class Game {
       this.dom.hudCombo.classList.add('hidden');
     }
 
-    let note = 'All is quiet on the cul-de-sac.';
+    let note = `${this.pramStates.length} prams. The street is watching.`;
     const crying = this.pramStates.filter((p) => p.state === 'crying').length;
     if (this.peace < 22) note = 'A neighbour just peeked through the blinds.';
     else if (this.peace < 45) note = 'A few curtains are twitching...';
@@ -2410,6 +2632,7 @@ export class Game {
     else if (this.peace < 72) note = 'The neighbourhood is holding its breath.';
     else if (this.pramStates.some((p) => p.state === 'needy')) note = 'A tiny request, before it becomes a wail.';
     else if (this.pramStates.some((p) => p.state === 'ready')) note = 'A sleepy baby is waiting in the crib.';
+    else if (this.intensity > 2.1) note = 'Five prams. The whole street is holding its breath.';
     this.dom.peaceNote.textContent = note;
 
     if (!this.carry) {
@@ -2431,7 +2654,7 @@ export class Game {
         this.dom.handThrow.classList.toggle('danger', !target);
         this.dom.handThrow.innerHTML = target
           ? `<span class="throw-key">R</span> THROW → ${target.label}`
-          : `<span class="throw-key">R</span> THROW → ${this.carry.kind === 'baby' ? 'MISS!' : 'NO TARGET'}`;
+          : `<span class="throw-key">R</span> ${this.carry.kind === 'baby' ? 'NOT AIMED → MISS!' : 'NOT AIMED → NO TARGET'}`;
       }
     }
     if (this.dom.dashBtn) {
@@ -2626,15 +2849,11 @@ export class Game {
   }
 
   checkEnd() {
-    if (this.timeLeft <= 0) {
-      this.endShift(true);
-    } else if (this.peace <= 0) {
-      this.endShift(false);
-    }
+    if (this.peace <= 0) this.endShift();
   }
 
-  endShift(survived) {
-    if (this.mode !== 'playing' || this.mode === 'results') return;
+  endShift() {
+    if (this.mode !== 'playing') return;
     this.mode = 'results';
     this.activeInteraction = null;
     this.dom.prompt.classList.add('hidden');
@@ -2647,97 +2866,202 @@ export class Game {
     this.keys.clear();
     this.touchMove.x = 0;
     this.touchMove.y = 0;
-    const stars = survived ? this.starCount() : 0;
-    this.lastResult = { survived, stars };
-    this.newBest = false;
-    if (survived && this.score > this.bestScore) {
-      this.bestScore = this.score;
-      this.newBest = true;
-      try {
-        window.localStorage.setItem('pramageddon-best', String(this.bestScore));
-      } catch (error) {
-        // Local storage can be unavailable in private mode; the game still works.
-      }
+    this.hideAimHelper();
+    const previousBest = this.bestScore;
+    this.bestScore = Math.max(previousBest, this.score);
+    this.newBest = this.score > previousBest;
+    try {
+      window.localStorage.setItem('pramageddon-best', String(this.bestScore));
+    } catch (error) {
+      // Local storage can be unavailable in private mode.
     }
-    if (survived) this.audio.fanfare();
-    else this.audio.fail();
-    this.showResults({ survived, stars });
+    this.lastResult = {
+      score: this.score,
+      seconds: Math.round(this.elapsedShift),
+      soothed: this.soothed,
+      bestCombo: this.bestCombo,
+      prams: this.pramStates.length,
+      failureReason: this.failureReason,
+    };
+    if (!this.scoreSaved) {
+      this.localEntry = saveLocalScore({
+        name: this.playerName,
+        score: this.score,
+        seconds: this.lastResult.seconds,
+        soothed: this.soothed,
+        combo: this.bestCombo,
+      });
+      this.scoreSaved = true;
+      this.leaderboardLocal = getLocalScores();
+    }
+    this.remoteSubmitted = false;
+    this.audio.fail();
+    this.showResults();
   }
 
-  starCount() {
-    const thresholds = this.night.starScore;
-    let stars = 0;
-    for (const threshold of thresholds) {
-      if (this.score >= threshold) stars += 1;
-    }
-    return stars;
-  }
-
-  showResults({ survived, stars }) {
+  showResults() {
     this.showScreens();
     this.dom.screenResults.classList.remove('hidden');
-    this.dom.screenResults.classList.toggle('success', survived);
-    this.dom.screenResults.classList.toggle('failed', !survived);
-    const babyThrowMiss = !survived && this.failureReason === 'babyThrow';
-    this.dom.resultsEyebrow.textContent = babyThrowMiss ? 'SHIFT ENDED · YEET FAILED' : survived ? 'SHIFT COMPLETE' : 'SHIFT OVER';
+    this.dom.screenResults.classList.add('failed');
+    this.dom.screenResults.classList.remove('success');
+    const result = this.lastResult || { score: this.score, seconds: 0, soothed: this.soothed, bestCombo: this.bestCombo, prams: this.pramStates.length };
+    const babyThrowMiss = this.failureReason === 'babyThrow';
+    this.dom.resultsEyebrow.textContent = babyThrowMiss ? 'RUN OVER · YEET FAILED' : 'RUN OVER · GJERDRUM ARCADE';
     this.dom.resultsTitle.textContent = babyThrowMiss
       ? 'BUTTERFINGERS.'
-      : survived
-        ? this.nightIndex === NIGHTS.length - 1
-          ? 'A HERO’S GOLDEN HOUR.'
-          : 'GOLDEN HOUR.'
+      : result.score >= 4000
+        ? 'THE STREET WILL TALK.'
         : 'THE NEIGHBOURS CALLED.';
     this.dom.resultsFlavor.textContent = babyThrowMiss
       ? `Inger threw ${this.missedBabyName} toward ${this.missedTargetLabel} and missed. Gjerdrum will never let her forget it.`
-      : survived
-        ? this.nightIndex === NIGHTS.length - 1
-          ? 'Three shifts. Inger is still standing. Every pram in Gjerdrum still standing, too.'
-          : 'Gjerdrum survived the afternoon. The babies did not notice. The fox is sulking.'
-        : 'Gjerdrum saw the fox. And the wailing. Mostly the wailing.';
-    this.dom.resultsStars.innerHTML = [0, 1, 2]
-      .map((i) => `<span class="result-star ${i < stars ? 'earned' : ''}">★</span>`)
-      .join('');
-    this.dom.resultsScore.textContent = String(this.score);
+      : `${formatRunClock(result.seconds)} of relative peace. ${result.prams} prams. Then the street won.`;
+    this.dom.resultsScore.textContent = String(result.score);
     this.dom.resultsBest?.classList.toggle('hidden', !this.newBest);
-    this.dom.resultSoothed.textContent = String(this.soothed);
-    this.dom.resultCombo.textContent = `×${Math.min(5, this.bestCombo)}`;
-    this.dom.resultPeace.textContent = `${Math.round(this.peace)}%`;
-    const rank = this.rank();
-    this.dom.resultRank.textContent = rank;
-    this.dom.nextNightBtn.classList.toggle('hidden', !survived);
-    this.dom.retryNightBtn.classList.toggle('hidden', survived);
-    this.dom.nextNightBtn.querySelector('.big-btn-main').textContent =
-      this.nightIndex >= NIGHTS.length - 1 ? 'FINISH SHIFT' : 'NEXT SHIFT';
-    if (survived) {
-      window.setTimeout(() => this.audio.star(0), 300);
-      if (stars > 1) window.setTimeout(() => this.audio.star(1), 520);
-      if (stars > 2) window.setTimeout(() => this.audio.star(2), 740);
+    this.dom.resultSoothed.textContent = String(result.soothed);
+    this.dom.resultTime.textContent = formatRunClock(result.seconds);
+    this.dom.resultCombo.textContent = `×${Math.min(5, result.bestCombo)}`;
+    this.dom.resultRank.textContent = this.rank();
+    if (this.dom.scoreNameInput) this.dom.scoreNameInput.value = this.playerName;
+    if (this.dom.submitScoreBtn) {
+      this.dom.submitScoreBtn.disabled = false;
+      this.dom.submitScoreBtn.querySelector('.big-btn-main').textContent = 'SEND TO GJERDRUM';
     }
+    if (this.dom.scoreSubmitStatus) this.dom.scoreSubmitStatus.textContent = '';
+    this.mode = 'results';
   }
 
   rank() {
-    if (!this.lastResult?.survived) return 'PRAM ROOKIE';
-    const stars = this.lastResult.stars;
-    if (stars >= 3) return 'NORWEGIAN LEGEND';
-    if (stars === 2) return 'SHUSH SPECIALIST';
-    if (stars === 1) return 'MILK WARMER';
-    return 'BARELY AWAKE';
-  }
-
-  nextNight() {
-    if (!this.lastResult?.survived) return;
-    if (this.nightIndex >= NIGHTS.length - 1) {
-      this.returnToTitle();
-      return;
-    }
-    this.nightIndex += 1;
-    this.showNightBriefing();
-    this.audio.ui();
+    const score = this.lastResult?.score ?? this.score;
+    if (score >= 7000) return 'GJERDRUM IMMORTAL';
+    if (score >= 4000) return 'PRAM LEGEND';
+    if (score >= 2000) return 'SHUSH SPECIALIST';
+    if (score >= 800) return 'MILK WARMER';
+    return 'PRAM ROOKIE';
   }
 
   retryNight() {
     this.audio.ui();
-    this.showNightBriefing();
+    this.startArcadeRun();
+  }
+
+  async submitScore() {
+    if (!this.lastResult || this.remoteSubmitted) return;
+    const name = savePlayerName(this.dom.scoreNameInput?.value || this.playerName);
+    this.playerName = name;
+    if (this.dom.submitScoreBtn) {
+      this.dom.submitScoreBtn.disabled = true;
+      this.dom.submitScoreBtn.querySelector('.big-btn-main').textContent = 'SENDING...';
+    }
+    if (this.dom.scoreSubmitStatus) this.dom.scoreSubmitStatus.textContent = 'Sending a covered dish of points to Gjerdrum...';
+    const result = await submitGlobalScore(name, this.lastResult.score, this.lastResult.seconds);
+    if (result.ok) {
+      this.remoteSubmitted = true;
+      if (this.dom.scoreSubmitStatus) this.dom.scoreSubmitStatus.textContent = `Sent as ${name}. The global board has been notified.`;
+      if (this.dom.submitScoreBtn) {
+        this.dom.submitScoreBtn.querySelector('.big-btn-main').textContent = 'SENT TO GJERDRUM';
+      }
+      if (this.localEntry?.id) {
+        renameLocalScore(this.localEntry.id, name);
+        this.localEntry.name = name;
+      }
+      this.leaderboardGlobal = [];
+      this.leaderboardLocal = getLocalScores();
+    } else {
+      if (this.dom.scoreSubmitStatus) this.dom.scoreSubmitStatus.textContent = 'Global board unreachable — your score is safe in the local leaderboard.';
+      if (this.dom.submitScoreBtn) {
+        this.dom.submitScoreBtn.disabled = false;
+        this.dom.submitScoreBtn.querySelector('.big-btn-main').textContent = 'TRY AGAIN';
+      }
+    }
+  }
+
+  escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  }
+
+  renderLeaderboard() {
+    if (!this.dom.leaderboardList) return;
+    const local = this.leaderboardLocal?.length ? this.leaderboardLocal : getLocalScores();
+    const global = this.leaderboardGlobal || [];
+    const localBest = local.length ? local[0].score : 0;
+    if (this.dom.leaderboardPersonal) {
+      this.dom.leaderboardPersonal.innerHTML = `<span>YOUR LOCAL BEST</span><strong>${localBest}</strong><small>${local.length ? `Top ${Math.min(3, local.length)} saved on this device` : 'No local runs yet'}</small>`;
+    }
+    const source = global.length ? global : local;
+    const isGlobal = global.length > 0;
+    const rows = source.slice(0, 10);
+    if (this.dom.leaderboardStatus) {
+      if (this.leaderboardLoading && !global.length) {
+        this.dom.leaderboardStatus.textContent = 'Loading the global board... local scores are ready.';
+      } else if (isGlobal) {
+        this.dom.leaderboardStatus.textContent = 'GLOBAL BOARD · DreamLo · scores from every Gjerdrum run.';
+      } else if (this.leaderboardStatus === 'offline') {
+        this.dom.leaderboardStatus.textContent = 'Global board unavailable. Showing scores stored on this device.';
+      } else {
+        this.dom.leaderboardStatus.textContent = 'No global scores yet — finish a run and send the first one.';
+      }
+    }
+    if (!rows.length) {
+      this.dom.leaderboardList.innerHTML = '<div class="lb-empty">No scores yet. The prams are waiting.</div>';
+      return;
+    }
+    this.dom.leaderboardList.innerHTML = `
+      <div class="lb-row lb-head"><span>#</span><span>NAME</span><span>SCORE</span><span>TIME</span></div>
+      ${rows
+        .map(
+          (entry, index) => `
+          <div class="lb-row ${index === 0 ? 'first' : ''}">
+            <span class="lb-rank">${index + 1}</span>
+            <span class="lb-name">${this.escapeHtml(entry.name)}${entry.local ? ' <i>YOU</i>' : ''}</span>
+            <span class="lb-score">${entry.score}</span>
+            <span class="lb-time">${formatRunClock(entry.seconds)}</span>
+          </div>`
+        )
+        .join('')}
+    `;
+  }
+
+  async loadLeaderboard() {
+    this.leaderboardLoading = true;
+    this.renderLeaderboard();
+    const result = await fetchGlobalScores({ force: true });
+    this.leaderboardLoading = false;
+    if (result.ok) {
+      this.leaderboardGlobal = result.entries;
+      this.leaderboardStatus = result.entries.length ? 'global' : 'empty';
+    } else {
+      this.leaderboardStatus = 'offline';
+    }
+    if (this.mode === 'leaderboard') this.renderLeaderboard();
+  }
+
+  openLeaderboard(returnMode = 'title') {
+    this.leaderboardReturn = returnMode;
+    this.mode = 'leaderboard';
+    this.leaderboardLocal = getLocalScores();
+    this.showScreens();
+    this.dom.screenLeaderboard.classList.remove('hidden');
+    this.dom.hud.classList.add('hidden');
+    this.dom.prompt.classList.add('hidden');
+    this.dom.countdown.classList.add('hidden');
+    this.audio.ui();
+    this.leaderboardGlobal = [];
+    this.leaderboardStatus = 'idle';
+    this.renderLeaderboard();
+    this.loadLeaderboard();
+  }
+
+  closeLeaderboard() {
+    this.audio.ui();
+    if (this.leaderboardReturn === 'results' && this.lastResult) {
+      this.showScreens();
+      this.dom.screenResults.classList.remove('hidden');
+      this.mode = 'results';
+      this.audio.setMusicPaused(true);
+    } else {
+      this.showStart();
+      this.audio.setMusicPaused(false);
+    }
   }
 
   returnToTitle() {
@@ -2755,6 +3079,7 @@ export class Game {
       this.dom.screenPause.classList.remove('hidden');
       this.dom.prompt.classList.add('hidden');
       this.dom.countdown.classList.add('hidden');
+      this.hideAimHelper();
       this.audio.setMusicPaused(true);
       this.audio.ui();
     } else if (this.mode === 'paused') {
@@ -2800,7 +3125,6 @@ export class Game {
     } else {
       this.mode = this.helpPreMode || 'title';
       if (this.mode === 'title') this.dom.screenStart.classList.remove('hidden');
-      if (this.mode === 'nightIntro') this.dom.screenNight.classList.remove('hidden');
       if (this.mode === 'playing' || this.mode === 'countdown') {
         this.lastHud = -1;
       }

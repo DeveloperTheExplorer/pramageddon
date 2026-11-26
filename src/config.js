@@ -134,3 +134,18 @@ export const COLORS = {
   red: '#e84a5f',
   warm: '#ffb45e',
 };
+
+// Endless arcade tuning. Prams are introduced in pramOrder as the run heats up.
+export const ARCADE = {
+  startPrams: 2,
+  maxPrams: 5,
+  pramOrder: [0, 2, 1, 3, 4],
+  addPramAt: [42, 98, 165],
+  baseNeedBite: 0.033,
+  baseCryDrain: 2.35,
+  firstFoxAt: 58,
+  itemThrowRange: 11.5,
+  babyThrowRange: 14.5,
+  itemAimWidth: 1.9,
+  babyAimWidth: 2.4,
+};
