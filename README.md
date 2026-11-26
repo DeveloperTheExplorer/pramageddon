@@ -11,6 +11,7 @@ There are no shifts or finish lines now. Every run is one endless arcade attempt
 - Start with **two prams**. A third arrives at about **0:42**, a fourth at **1:38**, and the fifth at **2:45**.
 - As the run heats up, needs bite faster, calm periods get shorter, foxes get bolder, and the music speeds up and adds layers.
 - Crying drains **Neighbourhood Peace**. At zero, the run ends and your score goes on the board.
+- **Crib already full?** Put the crying baby back in their own pram with **E** (or **Q** while beside it), then come back when the crib is free. The game now marks that pram and gives you a clear return prompt, so a full crib can never leave you stuck holding a baby.
 - Throwing is manual: face a pram/crib and watch the ground arrow. It turns **mint** when you are aimed at a valid target, red when you are not. `R` or **THROW** sends whatever is in Inger's hands in that direction. Miss a baby throw and the run ends immediately.
 - **Dash** with `Shift` or the lightning button (or double-tap the joystick) to cross the yard.
 

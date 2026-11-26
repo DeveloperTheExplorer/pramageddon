@@ -1608,7 +1608,8 @@ export class Game {
       }
     }
 
-    if (this.carry?.kind === 'baby' && this.carry.mood === 'crying') {
+    const cribBusy = this.world.stations.crib.state !== 'empty';
+    if (this.carry?.kind === 'baby' && this.carry.mood === 'crying' && !cribBusy) {
       const crib = this.world.stations.crib;
       crib.highlight.group.visible = true;
       crib.highlight.ring.material.color.set('#b3a4ff');
@@ -1642,14 +1643,18 @@ export class Game {
     }
     this.dom.prompt.classList.toggle('disabled', !best?.enabled);
 
-    // The pram that a carried baby belongs to is always flagged.
+    // The baby's own pram is flagged when it is the next step: a sleepy baby
+    // returning home, or a crying baby whose crib is occupied.
     for (const p of this.pramStates) {
       const isTarget = this.carry?.kind === 'baby' && this.carry.pramIndex === p.index;
-      p.pram.arrow.visible = Boolean(isTarget && this.carry.mood === 'ready' && this.mode === 'playing');
-      if (isTarget && this.carry.mood === 'ready' && p.state === 'carried') {
+      const returningCrying = isTarget && this.carry.mood === 'crying' && cribBusy && p.state === 'carried';
+      const returningReady = isTarget && this.carry.mood === 'ready' && p.state === 'carried';
+      p.pram.arrow.visible = Boolean((returningReady || returningCrying) && this.mode === 'playing');
+      if (returningReady || returningCrying) {
         p.pram.highlight.group.visible = true;
-        p.pram.highlight.ring.material.color.set('#ffd166');
-        p.pram.highlight.inner.material.color.set('#ffd166');
+        const color = returningReady ? '#ffd166' : '#ff9ec7';
+        p.pram.highlight.ring.material.color.set(color);
+        p.pram.highlight.inner.material.color.set(color);
         p.pram.highlight.ring.material.opacity = 0.42 + Math.sin(this.elapsed * 4) * 0.13;
         p.pram.highlight.inner.material.opacity = 0.06;
       }
@@ -1673,9 +1678,9 @@ export class Game {
         }
         return {
           ...base,
-          enabled: false,
-          action: null,
-          label: `${p.name} needs the big crib inside`,
+          enabled: true,
+          action: 'returnBabyToPram',
+          label: `Put ${p.name} back in their pram (still crying)`,
         };
       }
       if (this.carry.mood === 'ready') {
@@ -1771,7 +1776,12 @@ export class Game {
           if (station.state === 'empty') {
             return { ...base, enabled: true, action: 'placeInCrib', label: `Tuck ${this.carry.name} into the big crib` };
           }
-          return { ...base, enabled: false, action: null, label: station.state === 'soothing' ? 'Crib is busy shushing' : 'Crib is full' };
+          return {
+            ...base,
+            enabled: false,
+            action: null,
+            label: `Crib busy — put ${this.carry.name} back in their pram`,
+          };
         }
         return { ...base, enabled: false, action: null, label: `${this.carry.name} is ready for their pram, not the crib` };
       }
@@ -1879,6 +1889,9 @@ export class Game {
       case 'tuckBaby':
         this.tuckBaby(interaction.target);
         break;
+      case 'returnBabyToPram':
+        this.returnBabyToPram(interaction.target);
+        break;
       case 'pickupItem':
         this.pickupItem(interaction.item, interaction.key);
         break;
@@ -1921,7 +1934,15 @@ export class Game {
     };
     this.attachBabyMesh(p);
     this.audio.pickup();
-    this.showToast(`${p.name} is in your arms. Inside! To the crib!`, 'good', 'cry');
+    const cribBusy = this.world.stations.crib.state !== 'empty';
+    this.showToast(
+      cribBusy
+        ? `${p.name} is in your arms. The crib is busy — put them back in their pram (E there) if you need free hands.`
+        : `${p.name} is in your arms. Inside! To the crib!`,
+      cribBusy ? 'urgent' : 'good',
+      cribBusy ? 'warning' : 'cry',
+      cribBusy ? 3400 : 3000
+    );
     this.addShake(0.03);
     this.updateHud(true);
   }
@@ -2133,14 +2154,36 @@ export class Game {
     this.updateHud(true);
   }
 
+  returnBabyToPram(p) {
+    if (!p || this.carry?.kind !== 'baby' || this.carry.pramIndex !== p.index || this.carry.mood !== 'crying') return;
+    this.removeCarryMesh();
+    this.carry = null;
+    p.state = 'crying';
+    p.carryMood = null;
+    p.cryTimer = 0.4;
+    p.shake = 0;
+    p.pram.group.userData.babyGroup.visible = true;
+    p.pram.icon.visible = true;
+    this.applyPramIcon(p);
+    this.audio.cry(p.index, 0.8);
+    this.showToast(`${p.name} is back in their pram — still wailing. Come back when the crib is free.`, 'urgent', 'cry', 3000);
+    this.updateOrderCard(p, true);
+    this.updateHud(true);
+  }
+
   dropCarried() {
     if (!this.carry) {
       this.audio.error();
       return;
     }
     if (this.carry.kind === 'baby') {
+      const p = this.findPramState(this.carry.pramIndex);
+      if (p && this.player.position.distanceTo(p.pram.group.position) < 2.05) {
+        this.returnBabyToPram(p);
+        return;
+      }
       this.audio.error();
-      this.showToast("You can't put a baby down in the snow!", 'bad', 'warning', 1800);
+      this.showToast("You can't put a baby down in the snow! Take them to their pram, or find a free crib.", 'bad', 'warning', 2000);
       return;
     }
     this.removeCarryMesh();
@@ -2282,6 +2325,11 @@ export class Game {
 
   throwCarried() {
     if (this.mode !== 'playing' || !this.carry?.mesh) return;
+    if (this.carry.kind === 'baby' && this.carry.mood === 'crying' && this.world.stations.crib.state !== 'empty') {
+      this.audio.error();
+      this.showToast('The crib is busy. Put this baby back in their pram, or wait for the crib.', 'urgent', 'warning', 2400);
+      return;
+    }
     const carry = this.carry;
     const target = this.getThrowTarget();
     this.player.updateMatrixWorld(true);
@@ -2641,7 +2689,12 @@ export class Game {
       const label = this.carry.type === 'bottle' ? (this.carry.warm ? 'Warm bottle' : 'Cold bottle') : ITEM_META[this.carry.type]?.label || 'Item';
       this.dom.handContent.innerHTML = `<img class="pixel-icon" src="${getIconDataUrl(this.carry.type)}" alt="" /> ${label}`;
     } else {
-      const label = this.carry.mood === 'ready' ? `Sleepy ${this.carry.name} → pram` : `Crying ${this.carry.name} → crib`;
+      const cribBusy = this.world.stations.crib.state !== 'empty';
+      const label = this.carry.mood === 'ready'
+        ? `Sleepy ${this.carry.name} → pram`
+        : cribBusy
+          ? `Crying ${this.carry.name} → crib busy`
+          : `Crying ${this.carry.name} → crib`;
       this.dom.handContent.innerHTML = `<img class="pixel-icon" src="${getIconDataUrl(this.carry.mood === 'ready' ? 'zzz' : 'cry')}" alt="" /> ${label}`;
     }
 
@@ -2649,12 +2702,19 @@ export class Game {
       if (!this.carry) {
         this.dom.handThrow.classList.add('hidden');
       } else {
-        const target = this.getThrowTarget();
-        this.dom.handThrow.classList.remove('hidden');
-        this.dom.handThrow.classList.toggle('danger', !target);
-        this.dom.handThrow.innerHTML = target
-          ? `<span class="throw-key">R</span> THROW → ${target.label}`
-          : `<span class="throw-key">R</span> ${this.carry.kind === 'baby' ? 'NOT AIMED → MISS!' : 'NOT AIMED → NO TARGET'}`;
+        const cribBusy = this.carry.kind === 'baby' && this.carry.mood === 'crying' && this.world.stations.crib.state !== 'empty';
+        if (cribBusy) {
+          this.dom.handThrow.classList.remove('hidden');
+          this.dom.handThrow.classList.add('danger');
+          this.dom.handThrow.innerHTML = '<span class="throw-key">E</span> CRIB BUSY → PUT BACK IN PRAM';
+        } else {
+          const target = this.getThrowTarget();
+          this.dom.handThrow.classList.remove('hidden');
+          this.dom.handThrow.classList.toggle('danger', !target);
+          this.dom.handThrow.innerHTML = target
+            ? `<span class="throw-key">R</span> THROW → ${target.label}`
+            : `<span class="throw-key">R</span> ${this.carry.kind === 'baby' ? 'NOT AIMED → MISS!' : 'NOT AIMED → NO TARGET'}`;
+        }
       }
     }
     if (this.dom.dashBtn) {
@@ -2663,8 +2723,10 @@ export class Game {
       this.dom.dashBtn.setAttribute('aria-disabled', String(cooling));
     }
     if (this.dom.touchThrow) {
-      this.dom.touchThrow.classList.toggle('disabled', !this.carry);
-      this.dom.touchThrow.setAttribute('aria-disabled', String(!this.carry));
+      const busyBaby = this.carry?.kind === 'baby' && this.carry.mood === 'crying' && this.world.stations.crib.state !== 'empty';
+      const disabled = !this.carry || busyBaby;
+      this.dom.touchThrow.classList.toggle('disabled', disabled);
+      this.dom.touchThrow.setAttribute('aria-disabled', String(disabled));
     }
 
     for (const p of this.pramStates) this.updateOrderCard(p, force);
