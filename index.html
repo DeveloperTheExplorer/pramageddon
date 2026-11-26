@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#bdd7e6" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pramageddon" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content="Pramageddon: Inger’s endless Norwegian nap arcade in Gjerdrum. Keep outdoor-sleeping babies peaceful, aim your throws, and chase the high score." />
+    <title>PRAMAGEDDON — Inger’s Gjerdrum Arcade</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 22 16%22><rect width=%2222%22 height=%2216%22 fill=%22%23ba0c2f%22/><rect x=%226%22 width=%224%22 height=%2216%22 fill=%22%23fff%22/><rect y=%226%22 width=%2222%22 height=%224%22 fill=%22%23fff%22/><rect x=%227%22 width=%222%22 height=%2216%22 fill=%22%2300205b%22/><rect y=%227%22 width=%2222%22 height=%222%22 fill=%22%2300205b%22/></svg>" />
+    <script type="module" crossorigin src="./assets/index-Dz7EdLas.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-i-1nDRdP.css">
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game" aria-label="Pramageddon game canvas"></canvas>
+      <div id="grade"></div>
+      <div id="vignette"></div>
+      <div id="flash"></div>
+
+      <div id="hud" class="hidden" aria-live="polite">
+        <div class="topbar">
+          <div class="top-left">
+            <div class="night-stamp"><span id="hud-night">ARCADE</span></div>
+            <div class="shift-name" id="hud-shift-name">INGER · GJERDRUM</div>
+            <div class="timer" id="hud-timer">0:00</div>
+          </div>
+
+          <div class="peace-panel">
+            <div class="peace-labels">
+              <span class="peace-title">NEIGHBOURHOOD PEACE</span>
+              <span class="peace-value" id="peace-value">100%</span>
+            </div>
+            <div class="peace-track">
+              <div class="peace-fill" id="peace-fill"></div>
+              <div class="peace-shine"></div>
+              <span class="peace-mark mark-1"></span>
+              <span class="peace-mark mark-2"></span>
+            </div>
+            <div class="peace-note" id="peace-note">All is quiet on the cul-de-sac.</div>
+          </div>
+
+          <div class="score-panel">
+            <div class="score-label">RUN SCORE</div>
+            <div class="score-value" id="hud-score">0</div>
+            <div class="heat-pill" id="heat-pill">HEAT ×1.0</div>
+            <div class="combo-chip hidden" id="hud-combo">COMBO ×1</div>
+          </div>
+        </div>
+
+        <div id="order-rail" class="order-rail"></div>
+        <div id="warmer-hud" class="warmer-hud hidden">
+          <span class="warmer-kicker">BOTTLE WARMER</span>
+          <div class="warmer-track"><i id="warmer-fill"></i></div>
+          <strong id="warmer-status">WARMING</strong>
+        </div>
+        <div id="offscreen-markers" class="offscreen-markers" aria-hidden="true"></div>
+
+        <div id="hand-pill" class="hand-pill">
+          <span class="hand-label">IN HANDS</span>
+          <span id="hand-content" class="hand-content">nothing yet</span>
+          <span id="hand-throw" class="hand-throw hidden"></span>
+        </div>
+
+        <div id="prompt" class="prompt hidden">
+          <span class="keycap">E</span>
+          <span id="prompt-text">Interact</span>
+        </div>
+
+        <div id="touch-controls" aria-hidden="true">
+          <div id="joystick" class="joystick">
+            <span class="joystick-label">MOVE</span>
+            <div id="joystick-knob" class="joystick-knob"></div>
+          </div>
+          <div class="touch-buttons">
+            <button id="touch-drop" class="touch-btn small" aria-label="Drop item">Q</button>
+            <button id="touch-throw" class="touch-btn throw" aria-label="Throw carried item or baby">THROW</button>
+            <button id="touch-action" class="touch-btn" aria-label="Interact">E</button>
+          </div>
+        </div>
+
+        <div class="bottom-bar">
+          <div class="controls-hint">
+            <span><b>WASD</b> waddle</span>
+            <span><b>E / SPACE</b> grab + give</span>
+            <span><b>Q</b> drop</span>
+            <span><b>SHIFT</b> dash</span>
+            <span><b>R</b> throw</span>
+            <span><b>H</b> help</span>
+          </div>
+          <div class="icon-buttons">
+            <button id="dash-btn" class="icon-btn dash-btn" aria-label="Dash" title="Dash (Shift)">
+              <span>ϟ</span>
+            </button>
+            <button id="mute-btn" class="icon-btn" aria-label="Toggle sound" title="Sound (M)">
+              <span class="sound-on">♪</span>
+            </button>
+            <button id="pause-btn" class="icon-btn" aria-label="Pause" title="Pause (Esc)">
+              <span>❚❚</span>
+            </button>
+            <button id="fullscreen-btn" class="icon-btn" aria-label="Fullscreen" title="Fullscreen (F)">
+              <span class="fullscreen-glyph">⛶</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="toasts" class="toasts"></div>
+        <div id="fx-layer" class="fx-layer"></div>
+        <div id="countdown" class="countdown hidden"></div>
+        <div id="chaos-frame" class="chaos-frame"></div>
+      </div>
+
+      <section id="screen-start" class="screen start-screen">
+        <div class="start-stars" aria-hidden="true"></div>
+        <div class="start-wrap">
+          <div class="title-block">
+            <div class="kicker"><span class="kicker-line"></span> A COZY CHAOS SIMULATION <span class="kicker-line"></span></div>
+            <h1 class="game-title" data-text="PRAMAGEDDON">PRAMAGEDDON</h1>
+            <div class="subtitle-tape">NORWEGIAN NAP ARCADE</div>
+            <p class="tagline">The babies are asleep outside in Gjerdrum.<br /> <em>Inger is keeping it that way.</em></p>
+          </div>
+
+          <div class="start-card">
+            <div class="start-card-top">
+              <span class="tiny-label">DAGENS JOBB</span>
+              <span class="weather">GJERDRUM · 2°C · KOSELIG</span>
+            </div>
+            <p class="start-blurb">
+              Inger is keeping the prams of Gjerdrum peaceful while the babies nap outdoors. There is no finish line:
+              more prams arrive, the cries get louder, and occasionally a baby makes a break for it. Chase a high
+              score, aim your throws, catch the escapees, and survive as long as the neighbours can stand it.
+            </p>
+            <div class="how-row">
+              <div class="how-item"><span class="how-icon pink">🍼</span><span>Keep two prams<br /> calm. Then more.</span></div>
+              <div class="how-item"><span class="how-icon blue">☀️</span><span>Face a pram.<br /> Aim before you throw.</span></div>
+              <div class="how-item"><span class="how-icon yellow">🔥</span><span>Every minute<br /> gets meaner.</span></div>
+            </div>
+            <button id="start-btn" class="big-btn primary">
+              <span class="big-btn-small">CLOCK IN</span>
+              <span class="big-btn-main">START ARCADE RUN</span>
+            </button>
+            <div class="start-links">
+              <button id="help-btn" class="text-btn">HOW TO PLAY</button>
+              <span class="dot">·</span>
+              <button id="leaderboard-btn" class="text-btn">LEADERBOARD</button>
+              <span class="dot">·</span>
+              <button id="start-mute-btn" class="text-btn">SOUND: ON</button>
+            </div>
+            <div class="personal-best" id="personal-best">
+              <span>LOCAL BEST</span>
+              <strong id="best-value">0</strong>
+            </div>
+          </div>
+        </div>
+        <div class="start-footer">
+          <span>BABY-SAFE SINCE 2026</span>
+          <span class="footer-dots">✦ ✦ ✦</span>
+          <span>A TINY GAME ABOUT BIG FEELINGS</span>
+        </div>
+      </section>
+
+      <section id="screen-night" class="screen night-screen hidden">
+        <div class="night-card">
+          <div class="night-eyebrow" id="night-eyebrow">SHIFT BRIEFING · 14:00</div>
+          <div class="night-big" id="night-number">SHIFT 1</div>
+          <h2 id="night-title">Dagslur</h2>
+          <p id="night-subtitle">The first outdoor nap. Three prams. The whole street is watching.</p>
+          <div class="night-goals">
+            <div class="goal"><span class="goal-k">SHIFT LENGTH</span><strong id="night-duration">1:30</strong></div>
+            <div class="goal"><span class="goal-k">PRAMS</span><strong id="night-prams">3</strong></div>
+            <div class="goal"><span class="goal-k">FORECAST</span><strong id="night-forecast">LOW SUN</strong></div>
+          </div>
+          <div class="night-tip"><span class="tip-star">✦</span><span id="night-tip">Feed the need before it becomes a wail.</span></div>
+          <button id="night-btn" class="big-btn primary">
+            <span class="big-btn-small">READY AS I'LL EVER BE</span>
+            <span class="big-btn-main">TUCK IN</span>
+          </button>
+          <div class="night-controls" id="night-controls">
+            <span><b>WASD</b> move</span>
+            <span><b>E</b> grab / give</span>
+            <span><b>Q</b> drop</span>
+            <span><b>SHIFT</b> dash</span>
+            <span><b>R</b> throw</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-pause" class="screen soft-screen hidden">
+        <div class="paper-card pause-card">
+          <div class="paper-tape"></div>
+          <div class="eyebrow">HOLD THAT THOUGHT</div>
+          <h2>PAUSED</h2>
+          <p>The babies are holding their breath. Probably.</p>
+          <button id="resume-btn" class="big-btn primary"><span class="big-btn-main">BACK TO THE PRAMS</span></button>
+          <div class="pause-links">
+            <button id="pause-help-btn" class="text-btn">CONTROLS</button>
+            <span class="dot">·</span>
+            <button id="quit-btn" class="text-btn">QUIT TO TITLE</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-help" class="screen paper-screen hidden">
+        <div class="paper-card help-card">
+          <div class="paper-tape"></div>
+          <button id="help-close" class="close-btn" aria-label="Close help">×</button>
+          <div class="eyebrow">THE VERY SERIOUS MANUAL</div>
+          <h2>HOW TO KEEP THE PEACE</h2>
+          <div class="help-grid">
+            <div class="help-block">
+              <div class="help-num">01</div>
+              <h3>Watch the prams</h3>
+              <p>Little bubbles show what a stirring baby wants. Smokker and tepper wait on the porch. Flasker need warming on the stove — the HUD keeps a bottle-warmer timer and a big READY signal so you can leave it and still know. Bamser live in the chest inside.</p>
+            </div>
+            <div class="help-block">
+              <div class="help-num">02</div>
+              <h3>Give the right thing</h3>
+              <p>Walk close and press <b>E</b> to pick up an item, then <b>E</b> at the pram to give it. One pair of hands, one thing at a time. <b>Q</b> drops it, <b>SHIFT</b> dashes, and <b>R</b> throws it in the direction Inger faces. The ground arrow turns mint when you are aimed at a valid pram.</p>
+            </div>
+            <div class="help-block">
+              <div class="help-num">03</div>
+              <h3>Handle the wails</h3>
+              <p>A crying baby won't take a binky. Scoop them up with <b>E</b>, carry them inside, and tuck them into the big crib. Or aim at the crib and press <b>R</b> to throw the baby. A perfect throw is a shortcut; a missed baby ends the run. If the crib is busy, put the crying baby back in their own pram with <b>E</b> (or <b>Q</b> beside it), then come back when the crib is free. Babies also climb out of prams and the crib sometimes — chase them down and press <b>E</b> to catch them before they wander out of Gjerdrum.</p>
+            </div>
+            <div class="help-block">
+              <div class="help-num">04</div>
+              <h3>Protect the peace</h3>
+              <p>Crying drains the neighbourhood peace bar. The run ends at zero. New prams arrive, needs bite faster, and foxes get bold. Keep the loop moving.</p>
+            </div>
+          </div>
+          <div class="help-controls" id="help-controls">
+            <span><b>WASD / ARROWS</b><small>WADDLE</small></span>
+            <span><b>E / SPACE</b><small>INTERACT</small></span>
+            <span><b>Q</b><small>DROP</small></span>
+            <span><b>SHIFT</b><small>DASH</small></span>
+            <span><b>R</b><small>THROW</small></span>
+            <span><b>ESC / P</b><small>PAUSE</small></span>
+            <span><b>M</b><small>MUTE</small></span>
+          </div>
+          <button id="help-ok" class="big-btn primary"><span class="big-btn-main">I'VE GOT THIS</span></button>
+        </div>
+      </section>
+
+      <section id="screen-results" class="screen results-screen hidden">
+        <div class="results-card">
+          <div class="results-top">
+            <div>
+              <div class="eyebrow" id="results-eyebrow">RUN OVER</div>
+              <h2 id="results-title">THE NEIGHBOURS CALLED.</h2>
+              <p id="results-flavor">The street heard everything. Gjerdrum will remember.</p>
+            </div>
+          </div>
+          <div class="results-score">
+            <span>RUN SCORE</span>
+            <em id="results-best" class="result-best hidden">NEW LOCAL BEST</em>
+            <strong id="results-score">0</strong>
+          </div>
+          <div class="results-stats">
+            <div><span>BABIES SOOTHED</span><strong id="result-soothed">0</strong></div>
+            <div><span>SURVIVAL</span><strong id="result-time">0:00</strong></div>
+            <div><span>BEST COMBO</span><strong id="result-combo">×1</strong></div>
+            <div><span>RANK</span><strong id="result-rank">PRAM ROOKIE</strong></div>
+          </div>
+          <div class="score-submit">
+            <div class="score-submit-head">
+              <label for="score-name-input">YOUR NAME ON THE BOARD</label>
+              <span class="score-submit-note">MAX 12 · PUBLIC</span>
+            </div>
+            <div class="score-submit-row">
+              <input id="score-name-input" class="score-name-input" maxlength="12" autocomplete="nickname" autocapitalize="characters" enterkeyhint="send" inputmode="text" spellcheck="false" placeholder="INGER" value="INGER" aria-label="Your name on the leaderboard" />
+              <button id="submit-score-btn" class="big-btn secondary"><span class="big-btn-main">SEND TO GJERDRUM</span></button>
+            </div>
+            <span id="score-submit-status" class="score-submit-status"></span>
+          </div>
+          <div class="results-actions">
+            <button id="retry-night-btn" class="big-btn primary"><span class="big-btn-main">PLAY AGAIN</span></button>
+            <button id="results-leaderboard-btn" class="text-btn">LEADERBOARD</button>
+            <button id="results-title-btn" class="text-btn">TITLE SCREEN</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-leaderboard" class="screen paper-screen hidden">
+        <div class="paper-card leaderboard-card">
+          <div class="paper-tape"></div>
+          <button id="leaderboard-close" class="close-btn" aria-label="Close leaderboard">×</button>
+          <div class="eyebrow">GJERDRUM HALL OF NAPS</div>
+          <h2>HIGH SCORES</h2>
+          <p class="leaderboard-status" id="leaderboard-status">Loading the global board…</p>
+          <div class="leaderboard-personal" id="leaderboard-personal"></div>
+          <div class="leaderboard-list" id="leaderboard-list"></div>
+          <div class="leaderboard-actions">
+            <button id="leaderboard-play" class="big-btn primary"><span class="big-btn-main">PLAY ARCADE</span></button>
+            <button id="leaderboard-back" class="text-btn">BACK</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="fade"></div>
+    </div>
+  </body>
+</html>
