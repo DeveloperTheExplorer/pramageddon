@@ -264,9 +264,12 @@
             <div><span>RANK</span><strong id="result-rank">PRAM ROOKIE</strong></div>
           </div>
           <div class="score-submit">
-            <label for="score-name-input">NAME FOR THE BOARD</label>
+            <div class="score-submit-head">
+              <label for="score-name-input">YOUR NAME ON THE BOARD</label>
+              <span class="score-submit-note">MAX 12 · PUBLIC</span>
+            </div>
             <div class="score-submit-row">
-              <input id="score-name-input" maxlength="12" autocomplete="off" spellcheck="false" value="INGER" />
+              <input id="score-name-input" class="score-name-input" maxlength="12" autocomplete="nickname" autocapitalize="characters" enterkeyhint="send" inputmode="text" spellcheck="false" placeholder="INGER" value="INGER" aria-label="Your name on the leaderboard" />
               <button id="submit-score-btn" class="big-btn secondary"><span class="big-btn-main">SEND TO GJERDRUM</span></button>
             </div>
             <span id="score-submit-status" class="score-submit-status"></span>

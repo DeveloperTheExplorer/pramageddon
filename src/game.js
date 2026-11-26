@@ -366,6 +366,16 @@ export class Game {
     this.dom.scoreNameInput?.addEventListener('input', () => {
       this.playerName = savePlayerName(this.dom.scoreNameInput.value);
     });
+    this.dom.scoreNameInput?.addEventListener('focus', () => {
+      const input = this.dom.scoreNameInput;
+      if (input.value === this.playerName) input.select();
+      if (this.isCoarse) {
+        window.setTimeout(() => input.scrollIntoView({ block: 'center', behavior: 'smooth' }), 220);
+      }
+    });
+    this.dom.scoreNameInput?.addEventListener('blur', () => {
+      this.dom.scoreNameInput.value = savePlayerName(this.dom.scoreNameInput.value);
+    });
     this.dom.scoreNameInput?.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
